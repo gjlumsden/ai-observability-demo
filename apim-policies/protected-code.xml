@@ -1,0 +1,53 @@
+<policies>
+  <inbound>
+    <base />
+    <choose>
+      <when condition="@(context.Subscription.Id == &quot;research-team-sub&quot; || context.Subscription.Id == &quot;engineering-team-sub&quot;)">
+        <choose>
+          <when condition="@{
+            var prefix = context.Subscription.Id == &quot;research-team-sub&quot; ? &quot;research&quot; : &quot;engineering&quot;;
+            var userId = context.Request.Headers.GetValueOrDefault(&quot;x-demo-user-id&quot;, &quot;&quot;);
+            return !System.Text.RegularExpressions.Regex.IsMatch(userId, &quot;^&quot; + prefix + &quot;-user-[12]$&quot;);
+          }">
+            <return-response>
+              <set-status code="400" reason="Invalid synthetic user" />
+              <set-header name="Content-Type" exists-action="override">
+                <value>application/json</value>
+              </set-header>
+              <set-body>{"error":"The synthetic user is not valid for this team."}</set-body>
+            </return-response>
+          </when>
+        </choose>
+      </when>
+      <otherwise>
+        <validate-azure-ad-token tenant-id="{{tenant-id}}" header-name="Authorization" failed-validation-httpcode="401" failed-validation-error-message="The access token is invalid.">
+          <audiences>
+            <audience>api://{{entra-client-id}}</audience>
+            <audience>{{entra-client-id}}</audience>
+          </audiences>
+          <required-claims>
+            <claim name="scp" match="any" separator=" ">
+              <value>access_as_user</value>
+            </claim>
+          </required-claims>
+        </validate-azure-ad-token>
+      </otherwise>
+    </choose>
+    <set-header name="Authorization" exists-action="delete" />
+    <set-header name="Ocp-Apim-Subscription-Key" exists-action="delete" />
+    <set-query-parameter name="subscription-key" exists-action="delete" />
+    <set-header name="x-demo-user-id" exists-action="delete" />
+    <set-backend-service backend-id="foundry-content-safety" />
+    <rewrite-uri template="/contentsafety/text:detectProtectedMaterialForCode?api-version=2024-09-15-preview" copy-unmatched-params="false" />
+    <authentication-managed-identity resource="https://cognitiveservices.azure.com" />
+  </inbound>
+  <backend>
+    <base />
+  </backend>
+  <outbound>
+    <base />
+  </outbound>
+  <on-error>
+    <base />
+  </on-error>
+</policies>

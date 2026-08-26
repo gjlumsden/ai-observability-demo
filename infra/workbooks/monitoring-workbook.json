@@ -1,0 +1,202 @@
+{
+  "$schema": "https://github.com/Microsoft/Application-Insights-Workbooks/blob/master/schema/workbook.json",
+  "version": "Notebook/1.0",
+  "items": [
+    {
+      "type": 1,
+      "name": "title",
+      "content": {
+        "json": "# AI Observability usage and cost governance\nOperational usage from APIM and Application Insights. Use Azure Cost Management as the financial source."
+      }
+    },
+    {
+      "type": 9,
+      "name": "filters",
+      "content": {
+        "version": "KqlParameterItem/1.0",
+        "parameters": [
+          {
+            "id": "time-range",
+            "version": "KqlParameterItem/1.0",
+            "name": "TimeRange",
+            "type": 4,
+            "isRequired": true,
+            "value": {
+              "durationMs": 86400000
+            },
+            "typeSettings": {
+              "selectableValues": [
+                {
+                  "durationMs": 3600000
+                },
+                {
+                  "durationMs": 14400000
+                },
+                {
+                  "durationMs": 86400000
+                },
+                {
+                  "durationMs": 604800000
+                }
+              ]
+            },
+            "label": "Time range"
+          },
+          {
+            "id": "team",
+            "version": "KqlParameterItem/1.0",
+            "name": "Team",
+            "type": 1,
+            "isRequired": true,
+            "value": "All",
+            "label": "Team"
+          },
+          {
+            "id": "user",
+            "version": "KqlParameterItem/1.0",
+            "name": "User",
+            "type": 1,
+            "isRequired": true,
+            "value": "All",
+            "label": "User"
+          },
+          {
+            "id": "model",
+            "version": "KqlParameterItem/1.0",
+            "name": "Model",
+            "type": 1,
+            "isRequired": true,
+            "value": "All",
+            "label": "Model"
+          },
+          {
+            "id": "provider",
+            "version": "KqlParameterItem/1.0",
+            "name": "Provider",
+            "type": 1,
+            "isRequired": true,
+            "value": "All",
+            "label": "Provider"
+          },
+          {
+            "id": "project",
+            "version": "KqlParameterItem/1.0",
+            "name": "Project",
+            "type": 1,
+            "isRequired": true,
+            "value": "All",
+            "label": "Project"
+          }
+        ],
+        "style": "pills",
+        "queryType": 0,
+        "resourceType": "microsoft.insights/components"
+      }
+    },
+    {
+      "type": 3,
+      "name": "summary",
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "let teamFilter = '{Team}';\nlet userFilter = '{User}';\nlet modelFilter = '{Model}';\nlet providerFilter = '{Provider}';\nlet projectFilter = '{Project}';\ncustomMetrics\n| where timestamp {TimeRange}\n| extend Team=tostring(customDimensions['Team']), User=tostring(customDimensions['User']), Model=tostring(customDimensions['Model']), Project=tostring(customDimensions['Project'])\n| extend Provider=iff(Model startswith 'claude', 'Anthropic', 'OpenAI')\n| where teamFilter == 'All' or Team == teamFilter\n| where userFilter == 'All' or User == userFilter\n| where modelFilter == 'All' or Model == modelFilter\n| where providerFilter == 'All' or Provider == providerFilter\n| where projectFilter == 'All' or Project == projectFilter\n| summarize TotalTokens=toint(sumif(valueSum, name == 'Total Tokens')), InputTokens=toint(sumif(valueSum, name == 'Prompt Tokens')), OutputTokens=toint(sumif(valueSum, name == 'Completion Tokens')), Requests=toint(sumif(valueCount, name == 'Total Tokens'))",
+        "size": 4,
+        "title": "Usage summary",
+        "queryType": 0,
+        "resourceType": "microsoft.insights/components",
+        "visualization": "table"
+      }
+    },
+    {
+      "type": 3,
+      "name": "tokens-over-time",
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "customMetrics\n| where timestamp {TimeRange}\n| where name in ('Total Tokens', 'Prompt Tokens', 'Completion Tokens')\n| extend Team=tostring(customDimensions['Team']), User=tostring(customDimensions['User']), Model=tostring(customDimensions['Model']), Project=tostring(customDimensions['Project'])\n| extend Provider=iff(Model startswith 'claude', 'Anthropic', 'OpenAI')\n| where '{Team}' == 'All' or Team == '{Team}'\n| where '{User}' == 'All' or User == '{User}'\n| where '{Model}' == 'All' or Model == '{Model}'\n| where '{Provider}' == 'All' or Provider == '{Provider}'\n| where '{Project}' == 'All' or Project == '{Project}'\n| summarize Tokens=sum(valueSum) by bin(timestamp, 15m), Model, TokenType=name\n| order by timestamp asc",
+        "size": 0,
+        "title": "Input, output, and total tokens by model",
+        "queryType": 0,
+        "resourceType": "microsoft.insights/components",
+        "visualization": "timechart"
+      }
+    },
+    {
+      "type": 3,
+      "name": "tokens-by-team",
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "customMetrics\n| where timestamp {TimeRange}\n| where name == 'Total Tokens'\n| extend Team=tostring(customDimensions['Team']), User=tostring(customDimensions['User']), Model=tostring(customDimensions['Model']), Project=tostring(customDimensions['Project'])\n| extend Provider=iff(Model startswith 'claude', 'Anthropic', 'OpenAI')\n| where '{Team}' == 'All' or Team == '{Team}'\n| where '{User}' == 'All' or User == '{User}'\n| where '{Model}' == 'All' or Model == '{Model}'\n| where '{Provider}' == 'All' or Provider == '{Provider}'\n| where '{Project}' == 'All' or Project == '{Project}'\n| summarize Tokens=toint(sum(valueSum)) by Team\n| order by Tokens desc",
+        "size": 0,
+        "title": "Token share by team",
+        "queryType": 0,
+        "resourceType": "microsoft.insights/components",
+        "visualization": "piechart"
+      }
+    },
+    {
+      "type": 3,
+      "name": "tokens-by-user",
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "customMetrics\n| where timestamp {TimeRange}\n| where name == 'Total Tokens'\n| extend Team=tostring(customDimensions['Team']), User=tostring(customDimensions['User']), Model=tostring(customDimensions['Model']), Project=tostring(customDimensions['Project'])\n| extend Provider=iff(Model startswith 'claude', 'Anthropic', 'OpenAI')\n| where '{Team}' == 'All' or Team == '{Team}'\n| where '{User}' == 'All' or User == '{User}'\n| where '{Model}' == 'All' or Model == '{Model}'\n| where '{Provider}' == 'All' or Provider == '{Provider}'\n| where '{Project}' == 'All' or Project == '{Project}'\n| summarize Tokens=toint(sum(valueSum)) by User, Team\n| order by Tokens desc",
+        "size": 0,
+        "title": "Token share by user",
+        "queryType": 0,
+        "resourceType": "microsoft.insights/components",
+        "visualization": "barchart"
+      }
+    },
+    {
+      "type": 3,
+      "name": "latency",
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "requests\n| where timestamp {TimeRange}\n| where url has '/models/openai/' or url has '/models/claude/'\n| extend Model=iff(url has '/models/claude/', 'claude-opus-5', 'gpt-5.4')\n| extend Provider=iff(Model startswith 'claude', 'Anthropic', 'OpenAI')\n| where '{Model}' == 'All' or Model == '{Model}'\n| where '{Provider}' == 'All' or Provider == '{Provider}'\n| summarize Requests=count(), P50Milliseconds=round(percentile(duration, 50), 0), P95Milliseconds=round(percentile(duration, 95), 0) by Model\n| order by Model asc",
+        "size": 0,
+        "title": "Gateway latency by model",
+        "queryType": 0,
+        "resourceType": "microsoft.insights/components",
+        "visualization": "table"
+      }
+    },
+    {
+      "type": 3,
+      "name": "quota-responses",
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "requests\n| where timestamp {TimeRange}\n| where resultCode == '429'\n| where url has '/models/openai/' or url has '/models/claude/'\n| extend Model=iff(url has '/models/claude/', 'claude-opus-5', 'gpt-5.4')\n| summarize QuotaResponses=count() by bin(timestamp, 5m), Model, operation_Name\n| order by timestamp desc",
+        "size": 0,
+        "title": "Token quota responses",
+        "queryType": 0,
+        "resourceType": "microsoft.insights/components",
+        "visualization": "timechart"
+      }
+    },
+    {
+      "type": 3,
+      "name": "guardrail-outcomes",
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "customEvents\n| where timestamp {TimeRange}\n| where name == 'guardrail.decision'\n| extend Guardrail=tostring(customDimensions['guardrail']), Stage=tostring(customDimensions['stage']), Outcome=tostring(customDimensions['outcome'])\n| summarize Events=count() by bin(timestamp, 5m), Guardrail, Stage, Outcome\n| order by timestamp desc",
+        "size": 0,
+        "title": "Guardrail outcomes",
+        "queryType": 0,
+        "resourceType": "microsoft.insights/components",
+        "visualization": "table"
+      }
+    },
+    {
+      "type": 3,
+      "name": "data-quality",
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "customMetrics\n| where timestamp {TimeRange}\n| where name == 'Total Tokens'\n| extend Team=tostring(customDimensions['Team']), User=tostring(customDimensions['User']), Model=tostring(customDimensions['Model']), Project=tostring(customDimensions['Project'])\n| summarize LastMetricUtc=max(timestamp), MetricAgeMinutes=datetime_diff('minute', now(), max(timestamp)), UnknownTeam=countif(isempty(Team) or Team == 'Unknown'), UnknownUser=countif(isempty(User) or User == 'Unknown'), UnknownModel=countif(isempty(Model) or Model == 'Unknown'), UnknownProject=countif(isempty(Project) or Project == 'Unknown')",
+        "size": 0,
+        "title": "Data freshness and unknown attribution",
+        "queryType": 0,
+        "resourceType": "microsoft.insights/components",
+        "visualization": "table"
+      }
+    }
+  ],
+  "fallbackResourceIds": []
+}

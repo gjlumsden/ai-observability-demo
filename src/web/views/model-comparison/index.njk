@@ -1,0 +1,135 @@
+{% from "govuk/components/button/macro.njk" import govukButton %}
+{% from "govuk/components/textarea/macro.njk" import govukTextarea %}
+{% from "govuk/components/warning-text/macro.njk" import govukWarningText %}
+{% extends "layouts/main.njk" %}
+
+{% block content %}
+  <h1 class="govuk-heading-xl">Governed Model Comparison</h1>
+  <p class="govuk-body-l">Send one scientific coding task through the AI Gateway to GPT-5.4 and Claude Opus 5.</p>
+
+  {{ govukWarningText({
+    text: "Use synthetic or public information only. The demo records usage metadata but does not record prompt bodies.",
+    iconFallbackText: "Warning"
+  }) }}
+
+  <div id="error-summary" hidden></div>
+
+  <h2 class="govuk-heading-m">Sample prompts</h2>
+  <p class="govuk-body">Select a synthetic scientific engineering task. The scenario is intentionally small so the model, token, latency, quota, and cost signals remain clear.</p>
+  <div class="govuk-button-group" aria-label="Model comparison prompt samples">
+    {% for sample in samples %}
+      <button
+        type="button"
+        class="govuk-button govuk-button--secondary sample-prompt"
+        data-module="govuk-button"
+        data-prompt="{{ sample.prompt }}">
+        {{ sample.label }}
+      </button>
+    {% endfor %}
+  </div>
+
+  <form id="comparison-form" method="post" action="/model-comparison/run">
+    {{ govukTextarea({
+      name: "prompt",
+      id: "prompt",
+      rows: 7,
+      label: {
+        text: "Prompt",
+        classes: "govuk-label--m",
+        isPageHeading: false
+      },
+      hint: { text: "Select a sample or enter a synthetic scientific coding task." }
+    }) }}
+    {{ govukButton({ text: "Compare models" }) }}
+  </form>
+
+  <section id="results-panel" class="govuk-!-margin-top-6" aria-live="polite" hidden>
+    <h2 class="govuk-heading-l">Comparison results</h2>
+    <p class="govuk-body">Gateway correlation ID: <code id="correlation-id"></code></p>
+    <div id="results"></div>
+  </section>
+{% endblock %}
+
+{% block pageScripts %}
+<script nonce="{{ cspNonce }}">
+  const form = document.getElementById('comparison-form');
+  const resultsPanel = document.getElementById('results-panel');
+  const results = document.getElementById('results');
+  const correlationId = document.getElementById('correlation-id');
+  const errorSummary = document.getElementById('error-summary');
+  const promptInput = document.getElementById('prompt');
+
+  document.querySelectorAll('.sample-prompt').forEach((button) => {
+    button.addEventListener('click', () => {
+      promptInput.value = button.dataset.prompt;
+      promptInput.focus();
+    });
+  });
+
+  function showError(message) {
+    errorSummary.hidden = false;
+    errorSummary.innerHTML = '<div class="govuk-error-summary" data-module="govuk-error-summary"><div role="alert"><h2 class="govuk-error-summary__title">There is a problem</h2><div class="govuk-error-summary__body"><ul class="govuk-list govuk-error-summary__list"><li><a href="#prompt"></a></li></ul></div></div></div>';
+    errorSummary.querySelector('a').textContent = message;
+  }
+
+  function addResult(result) {
+    const card = document.createElement('div');
+    card.className = 'govuk-summary-card govuk-!-margin-bottom-6';
+
+    const header = document.createElement('div');
+    header.className = 'govuk-summary-card__title-wrapper';
+    const title = document.createElement('h3');
+    title.className = 'govuk-summary-card__title';
+    title.textContent = result.provider + ' - ' + result.model;
+    header.appendChild(title);
+
+    const content = document.createElement('div');
+    content.className = 'govuk-summary-card__content';
+    const metrics = document.createElement('p');
+    metrics.className = 'govuk-body';
+    const remainingQuota = result.remainingQuotaTokens === null ? 'Not returned' : result.remainingQuotaTokens;
+    metrics.textContent = 'Team: ' + result.team +
+      ' | User: ' + result.user +
+      ' | Input tokens: ' + result.inputTokens +
+      ' | Output tokens: ' + result.outputTokens +
+      ' | Total tokens: ' + result.totalTokens +
+      ' | Latency: ' + result.latencyMs + ' ms' +
+      ' | Daily quota remaining: ' + remainingQuota;
+    const response = document.createElement('div');
+    response.className = 'govuk-inset-text';
+    if (result.html) {
+      response.innerHTML = result.html;
+    } else {
+      response.textContent = result.text || 'The model returned no text.';
+    }
+    content.appendChild(metrics);
+    content.appendChild(response);
+    card.appendChild(header);
+    card.appendChild(content);
+    results.appendChild(card);
+  }
+
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    errorSummary.hidden = true;
+    resultsPanel.hidden = false;
+    results.textContent = 'Running both models...';
+
+    const response = await fetch(form.action, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: promptInput.value })
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      resultsPanel.hidden = true;
+      showError(payload.error || payload.message || 'The comparison could not be completed.');
+      return;
+    }
+
+    correlationId.textContent = payload.correlationId || '';
+    results.textContent = '';
+    (payload.results || []).forEach(addResult);
+  });
+</script>
+{% endblock %}

@@ -1,0 +1,108 @@
+{% from "govuk/components/button/macro.njk" import govukButton %}
+{% from "govuk/components/textarea/macro.njk" import govukTextarea %}
+{% from "govuk/components/warning-text/macro.njk" import govukWarningText %}
+{% extends "layouts/main.njk" %}
+
+{% block content %}
+  <h1 class="govuk-heading-xl">Weather Forecasting Agent</h1>
+  <p class="govuk-body-l">Use a Foundry prompt agent with one governed weather MCP tool.</p>
+
+  {{ govukWarningText({
+    text: "Use public locations only. Confirm operational decisions against current site conditions and event safety plans.",
+    iconFallbackText: "Warning"
+  }) }}
+
+  <div id="error-summary" hidden></div>
+
+  <h2 class="govuk-heading-m">Prompt options</h2>
+  <div class="govuk-button-group" aria-label="Weather agent prompt options">
+    {% for option in prompts %}
+      <button
+        type="button"
+        class="govuk-button govuk-button--secondary prompt-option"
+        data-module="govuk-button"
+        data-prompt="{{ option.prompt }}">
+        {{ option.label }}
+      </button>
+    {% endfor %}
+  </div>
+
+  <form id="weather-form" method="post" action="/weather-agent/run">
+    {{ govukTextarea({
+      name: "prompt",
+      id: "prompt",
+      rows: 6,
+      label: {
+        text: "Prompt",
+        classes: "govuk-label--m",
+        isPageHeading: false
+      },
+      hint: { text: "Select a prompt option or enter a public-location planning question." }
+    }) }}
+    {{ govukButton({ text: "Ask weather agent" }) }}
+  </form>
+
+  <section id="result-panel" class="govuk-!-margin-top-6" aria-live="polite" hidden>
+    <h2 class="govuk-heading-l">Agent result</h2>
+    <p class="govuk-body">Gateway correlation ID: <code id="correlation-id"></code></p>
+    <p class="govuk-body">Foundry response ID: <code id="response-id"></code></p>
+    <p class="govuk-body" id="metrics"></p>
+    <div id="result" class="govuk-inset-text"></div>
+  </section>
+{% endblock %}
+
+{% block pageScripts %}
+<script nonce="{{ cspNonce }}">
+  const form = document.getElementById('weather-form');
+  const promptInput = document.getElementById('prompt');
+  const resultPanel = document.getElementById('result-panel');
+  const result = document.getElementById('result');
+  const correlationId = document.getElementById('correlation-id');
+  const responseId = document.getElementById('response-id');
+  const metrics = document.getElementById('metrics');
+  const errorSummary = document.getElementById('error-summary');
+
+  document.querySelectorAll('.prompt-option').forEach((button) => {
+    button.addEventListener('click', () => {
+      promptInput.value = button.dataset.prompt;
+      promptInput.focus();
+    });
+  });
+
+  function showError(message) {
+    errorSummary.hidden = false;
+    errorSummary.innerHTML = '<div class="govuk-error-summary" data-module="govuk-error-summary"><div role="alert"><h2 class="govuk-error-summary__title">There is a problem</h2><div class="govuk-error-summary__body"><ul class="govuk-list govuk-error-summary__list"><li><a href="#prompt"></a></li></ul></div></div></div>';
+    errorSummary.querySelector('a').textContent = message;
+  }
+
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    errorSummary.hidden = true;
+    resultPanel.hidden = false;
+    result.textContent = 'Running the agent and weather tool...';
+
+    const response = await fetch(form.action, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: promptInput.value })
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      resultPanel.hidden = true;
+      showError(payload.error || payload.message || 'The weather agent could not complete the request.');
+      return;
+    }
+
+    correlationId.textContent = payload.correlationId || '';
+    responseId.textContent = payload.responseId || '';
+    const tools = payload.tools?.length ? payload.tools.join(', ') : 'No tool name returned';
+    metrics.textContent = 'Agent: ' + payload.agentName +
+      ' | Tool: ' + tools +
+      ' | Input tokens: ' + payload.inputTokens +
+      ' | Visible output tokens: ' + (payload.outputTokens - payload.reasoningTokens) +
+      ' | Reasoning tokens: ' + payload.reasoningTokens +
+      ' | Total tokens: ' + payload.totalTokens;
+    result.innerHTML = payload.html || '';
+  });
+</script>
+{% endblock %}

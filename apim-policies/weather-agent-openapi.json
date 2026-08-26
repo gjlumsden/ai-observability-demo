@@ -1,0 +1,39 @@
+{
+  "openapi": "3.0.1",
+  "info": {
+    "title": "Weather Forecasting Agent",
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/responses": {
+      "post": {
+        "operationId": "invokeWeatherAgent",
+        "summary": "Invoke the governed weather forecasting agent",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "input"
+                ],
+                "properties": {
+                  "input": {
+                    "type": "string",
+                    "maxLength": 2000
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Agent response"
+          }
+        }
+      }
+    }
+  }
+}

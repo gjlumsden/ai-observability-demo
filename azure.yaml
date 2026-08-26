@@ -1,0 +1,18 @@
+name: ai-observability-demo
+metadata:
+  template: ai-observability-demo@0.1.0
+services:
+  web:
+    project: ./src/web
+    language: js
+    host: appservice
+hooks:
+  preprovision:
+    shell: pwsh
+    run: ./hooks/preprovision.ps1
+  postprovision:
+    shell: pwsh
+    run: ./hooks/postprovision.ps1
+  postdeploy:
+    shell: pwsh
+    run: ./hooks/postdeploy.ps1

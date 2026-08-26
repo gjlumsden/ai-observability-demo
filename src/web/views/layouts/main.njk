@@ -1,0 +1,88 @@
+{% from "govuk/components/phase-banner/macro.njk" import govukPhaseBanner %}
+{% from "govuk/components/service-navigation/macro.njk" import govukServiceNavigation %}
+
+{% extends "govuk/template.njk" %}
+
+{% block pageTitle %}{{ pageTitle or serviceName }} - DEMO{% endblock %}
+
+{% block headIcons %}
+  <link rel="icon" href="/demo-favicon.svg" type="image/svg+xml">
+{% endblock %}
+
+{% block head %}
+  {{ super() }}
+  <link href="/govuk/govuk-frontend.min.css" rel="stylesheet">
+  <style nonce="{{ cspNonce }}">
+    .demo-header__link {
+      display: inline-flex;
+      gap: 0.5rem;
+      align-items: center;
+    }
+
+    .demo-header__emoji {
+      font-size: 2rem;
+      line-height: 1;
+    }
+  </style>
+{% endblock %}
+
+{% block header %}
+  <header class="govuk-header" data-module="govuk-header">
+    <div class="govuk-header__container govuk-width-container">
+      <div class="govuk-header__logo">
+        <a href="/" class="govuk-header__link govuk-header__link--homepage demo-header__link" aria-label="Demo home">
+          <span class="demo-header__emoji" aria-hidden="true">🧪</span>
+          <span class="govuk-header__logotype-text">DEMO</span>
+        </a>
+      </div>
+    </div>
+  </header>
+  {{ govukServiceNavigation({
+    serviceName: serviceName,
+    serviceUrl: "/",
+    navigation: navigation
+  }) }}
+{% endblock %}
+
+{% block beforeContent %}
+  <div class="govuk-width-container">
+    {{ govukPhaseBanner({
+      tag: { text: "Beta" },
+      html: "This application demonstrates governed AI platform observability."
+    }) }}
+  </div>
+{% endblock %}
+
+{% block main %}
+  <div class="govuk-width-container">
+    <main class="govuk-main-wrapper" id="main-content" role="main">
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+{% endblock %}
+
+{% block footer %}
+  <footer class="govuk-footer">
+    <div class="govuk-width-container">
+      <div class="govuk-footer__meta">
+        <div class="govuk-footer__meta-item govuk-footer__meta-item--grow">
+          <h2 class="govuk-visually-hidden">Support links</h2>
+          <ul class="govuk-footer__inline-list">
+            <li class="govuk-footer__inline-list-item">
+              <a class="govuk-footer__link" href="/healthz">Health check</a>
+            </li>
+          </ul>
+          <span class="govuk-footer__licence-description">Demonstration environment</span>
+        </div>
+      </div>
+    </div>
+  </footer>
+{% endblock %}
+
+{% block bodyEnd %}
+  <script type="module" nonce="{{ cspNonce }}">
+    import { initAll } from '/govuk/govuk-frontend.min.js'
+    initAll()
+  </script>
+  {% block pageScripts %}{% endblock %}
+{% endblock %}

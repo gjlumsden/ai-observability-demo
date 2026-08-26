@@ -1,0 +1,75 @@
+<policies>
+  <inbound>
+    <base />
+    <choose>
+      <when condition="@(context.Subscription.Id != &quot;weather-agent-sub&quot;)">
+        <return-response>
+          <set-status code="403" reason="Weather agent model subscription required" />
+          <set-header name="Content-Type" exists-action="override">
+            <value>application/json</value>
+          </set-header>
+          <set-body>{"error":"The weather agent model subscription is required."}</set-body>
+        </return-response>
+      </when>
+    </choose>
+    <choose>
+      <when condition="@{
+        var body = context.Request.Body.As&lt;Newtonsoft.Json.Linq.JObject&gt;(preserveContent: true);
+        return (string)body["model"] != "gpt-5.4" || (string)body["reasoning_effort"] != "low";
+      }">
+        <return-response>
+          <set-status code="400" reason="Unexpected agent model configuration" />
+          <set-header name="Content-Type" exists-action="override">
+            <value>application/json</value>
+          </set-header>
+          <set-body>{"error":"The prompt agent must request the governed GPT-5.4 model with low reasoning."}</set-body>
+        </return-response>
+      </when>
+    </choose>
+    <rewrite-uri template="/v1/chat/completions" copy-unmatched-params="false" />
+    <llm-token-limit
+      counter-key="@(context.Subscription.Id)"
+      tokens-per-minute="20000"
+      token-quota="500000"
+      token-quota-period="Daily"
+      estimate-prompt-tokens="true"
+      retry-after-header-name="Retry-After"
+      remaining-quota-tokens-header-name="x-token-quota-remaining"
+      remaining-tokens-header-name="x-tokens-remaining"
+      tokens-consumed-header-name="x-tokens-consumed" />
+    <llm-content-safety backend-id="foundry-content-safety" shield-prompt="true" enforce-on-completions="false">
+      <categories output-type="EightSeverityLevels">
+        <category name="Hate" threshold="4" />
+        <category name="SelfHarm" threshold="4" />
+        <category name="Sexual" threshold="4" />
+        <category name="Violence" threshold="4" />
+      </categories>
+    </llm-content-safety>
+    <llm-emit-token-metric namespace="ai-observability-gateway">
+      <dimension name="API ID" />
+      <dimension name="Operation ID" />
+      <dimension name="Product ID" />
+      <dimension name="Subscription ID" />
+      <dimension name="Team" value="Agents" />
+      <dimension name="User" value="weather-forecast-agent" />
+      <dimension name="Model" value="gpt-5.4" />
+      <dimension name="Project" value="platform-engineering" />
+      <dimension name="Attribution Mode" value="agent" />
+    </llm-emit-token-metric>
+    <set-header name="Authorization" exists-action="delete" />
+    <set-header name="api-key" exists-action="delete" />
+    <set-header name="Ocp-Apim-Subscription-Key" exists-action="delete" />
+    <set-query-parameter name="subscription-key" exists-action="delete" />
+    <set-backend-service backend-id="foundry-openai-model" />
+    <authentication-managed-identity resource="https://cognitiveservices.azure.com" />
+  </inbound>
+  <backend>
+    <base />
+  </backend>
+  <outbound>
+    <base />
+  </outbound>
+  <on-error>
+    <base />
+  </on-error>
+</policies>

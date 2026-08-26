@@ -1,0 +1,36 @@
+{
+  "name": "ai-observability-demo-web",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Web application for the AI observability demo",
+  "engines": {
+    "node": ">=24 <25"
+  },
+  "scripts": {
+    "start": "node app.js",
+    "dev": "nodemon app.js",
+    "build": "node scripts/copy-govuk-assets.js",
+    "test:auth-logging": "node scripts/test-auth-logging.js",
+    "test:weather": "node scripts/test-weather-api.js",
+    "postinstall": "node scripts/copy-govuk-assets.js"
+  },
+  "dependencies": {
+    "@azure/monitor-opentelemetry": "1.19.0",
+    "@azure/msal-node": "^5.5.0",
+    "@opentelemetry/api": "1.9.1",
+    "@opentelemetry/api-logs": "0.220.0",
+    "cookie-parser": "^1.4.7",
+    "dotenv": "^17.2.3",
+    "express": "^5.2.1",
+    "express-session": "^1.18.2",
+    "govuk-frontend": "^5.12.0",
+    "helmet": "^8.1.0",
+    "markdown-it": "^14.3.0",
+    "morgan": "^1.10.1",
+    "nunjucks": "^3.2.4",
+    "sanitize-html": "^2.17.7"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.11"
+  }
+}

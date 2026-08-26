@@ -1,0 +1,2409 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AI Observability and Cost Management</title>
+  <script>
+    (() => {
+      const param = new URLSearchParams(window.location.search).get("scoutTheme");
+      const theme =
+        param || (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+      document.documentElement.setAttribute("data-theme", theme);
+    })();
+  </script>
+  <style>
+    :root {
+      color-scheme: light;
+      --cp-bg: #f7f4ef;
+      --cp-bg-elevated: #fcfbf8;
+      --cp-surface: #ffffff;
+      --cp-surface-soft: #f5f5f5;
+      --cp-border: #dedede;
+      --cp-border-strong: #919191;
+      --cp-text: #242424;
+      --cp-text-muted: #5c5c5c;
+      --cp-text-soft: #6f6f6f;
+      --cp-accent: #b11f4b;
+      --cp-accent-hover: #9a1a41;
+      --cp-accent-soft: rgba(177, 31, 75, 0.08);
+      --cp-accent-fg: #ffffff;
+      --cp-success: #16a34a;
+      --cp-danger: #dc2626;
+      --cp-warning: #f59e0b;
+      --cp-link: #0078d4;
+      --cp-shadow: 0 18px 48px rgba(0, 0, 0, 0.12);
+      --cp-overlay: rgba(255, 255, 255, 0.8);
+      --cp-panel: rgba(255, 255, 255, 0.86);
+      --cp-panel-strong: rgba(255, 255, 255, 0.96);
+      --cp-sheen: rgba(255, 255, 255, 0.55);
+      --cp-highlight: rgba(177, 31, 75, 0.12);
+    }
+    html[data-theme="dark"] {
+      color-scheme: dark;
+      --cp-bg: #3d3b3a;
+      --cp-bg-elevated: #343231;
+      --cp-surface: #292929;
+      --cp-surface-soft: #2e2e2e;
+      --cp-border: #474747;
+      --cp-border-strong: #5f5f5f;
+      --cp-text: #dedede;
+      --cp-text-muted: #919191;
+      --cp-text-soft: #b0b0b0;
+      --cp-accent: #fd8ea1;
+      --cp-accent-hover: #fb7b91;
+      --cp-accent-soft: rgba(253, 142, 161, 0.14);
+      --cp-accent-fg: #1a1a1a;
+      --cp-success: #4ade80;
+      --cp-danger: #f87171;
+      --cp-warning: #fbbf24;
+      --cp-link: #4da6ff;
+      --cp-shadow: 0 18px 48px rgba(0, 0, 0, 0.32);
+      --cp-overlay: rgba(41, 41, 41, 0.88);
+      --cp-panel: rgba(41, 41, 41, 0.72);
+      --cp-panel-strong: rgba(41, 41, 41, 0.96);
+      --cp-sheen: rgba(255, 255, 255, 0.04);
+      --cp-highlight: rgba(253, 142, 161, 0.12);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      height: 100%;
+      margin: 0;
+    }
+
+    body {
+      overflow: hidden;
+      background: var(--cp-bg);
+      color: var(--cp-text);
+      font-family: "Segoe UI", Aptos, Calibri, -apple-system, BlinkMacSystemFont, sans-serif;
+    }
+
+    button,
+    a {
+      font: inherit;
+    }
+
+    button:focus-visible,
+    a:focus-visible {
+      outline: 3px solid var(--cp-warning);
+      outline-offset: 3px;
+    }
+
+    .app {
+      display: grid;
+      grid-template-rows: auto 4px minmax(0, 1fr) auto;
+      height: 100%;
+    }
+
+    .topbar {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      min-height: 60px;
+      padding: 8px 16px;
+      border-bottom: 4px solid var(--cp-success);
+      background: var(--cp-text);
+      color: var(--cp-surface);
+    }
+
+    html[data-theme="dark"] .topbar {
+      background: var(--cp-bg-elevated);
+      color: var(--cp-text);
+    }
+
+    .brand {
+      min-width: 0;
+      flex: 1;
+    }
+
+    .brand-kicker {
+      margin: 0 0 2px;
+      color: var(--cp-success);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .brand-title {
+      margin: 0;
+      overflow: hidden;
+      font-size: 22px;
+      font-weight: 700;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .message-pill {
+      max-width: 560px;
+      padding: 8px 12px;
+      border: 1px solid var(--cp-border);
+      border-radius: 0.625rem;
+      background: transparent;
+      color: inherit;
+      font-size: 13px;
+      line-height: 1.35;
+    }
+
+    .top-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .range-control {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      color: inherit;
+      font-size: 12px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    .range-control select {
+      min-height: 34px;
+      padding: 4px 28px 4px 8px;
+      border: 1px solid var(--cp-border);
+      border-radius: 0.625rem;
+      background: var(--cp-surface);
+      color: var(--cp-text);
+      font: inherit;
+    }
+
+    .progress-track {
+      overflow: hidden;
+      background: var(--cp-border);
+    }
+
+    .progress-bar {
+      height: 100%;
+      width: 0;
+      background: var(--cp-success);
+      transition: width 180ms ease;
+    }
+
+    .workspace {
+      display: block;
+      min-height: 0;
+    }
+
+    .rail {
+      min-width: 0;
+      overflow-x: auto;
+      overflow-y: hidden;
+      padding: 2px 4px;
+      scrollbar-width: thin;
+    }
+
+    .rail-list {
+      display: flex;
+      gap: 4px;
+      align-items: center;
+      justify-content: center;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+      white-space: nowrap;
+    }
+
+    .rail-button {
+      display: grid;
+      width: 30px;
+      height: 30px;
+      place-items: center;
+      padding: 0;
+      border: 1px solid transparent;
+      border-radius: 0.625rem;
+      background: transparent;
+      color: var(--cp-text);
+      cursor: pointer;
+    }
+
+    .rail-button:hover {
+      border-color: var(--cp-border);
+      background: var(--cp-surface);
+    }
+
+    .rail-button[aria-current="step"] {
+      border-color: var(--cp-link);
+      background: var(--cp-surface);
+    }
+
+    .rail-number {
+      display: grid;
+      width: 26px;
+      height: 26px;
+      place-items: center;
+      border-radius: 0.625rem;
+      color: var(--cp-text-muted);
+      font-size: 11px;
+      font-weight: 700;
+    }
+
+    .rail-button[aria-current="step"] .rail-number {
+      border-color: var(--cp-link);
+      background: var(--cp-link);
+      color: var(--cp-surface);
+    }
+
+    .stage {
+      height: 100%;
+      overflow: hidden;
+      padding: 8px;
+    }
+
+    .slide {
+      width: 100%;
+      height: 100%;
+      margin: 0 auto;
+      padding: clamp(18px, 1.8vw, 34px);
+      overflow: hidden;
+      border: 1px solid var(--cp-border);
+      border-radius: 16px;
+      background: var(--cp-surface);
+      box-shadow: 0 0 2px var(--cp-border), 0 1px 2px var(--cp-border);
+    }
+
+    .slide-content {
+      display: flex;
+      flex-direction: column;
+      min-height: 100%;
+      width: 100%;
+      transform-origin: top left;
+    }
+
+    .slide-header {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 24px;
+      align-items: start;
+      margin-bottom: 16px;
+      padding-bottom: 14px;
+      border-bottom: 1px solid var(--cp-border);
+    }
+
+    .eyebrow {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      margin-bottom: 6px;
+    }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      min-height: 28px;
+      padding: 5px 10px;
+      border: 1px solid var(--cp-border);
+      border-radius: 0.625rem;
+      background: var(--cp-surface-soft);
+      color: var(--cp-text-muted);
+      font-size: 13px;
+      font-weight: 650;
+    }
+
+    .tag.accent {
+      border-color: var(--cp-success);
+      background: var(--cp-surface-soft);
+      color: var(--cp-success);
+    }
+
+    .slide h1 {
+      margin: 0;
+      font-size: clamp(36px, 3.2vw, 54px);
+      line-height: 1.05;
+      letter-spacing: -0.025em;
+    }
+
+    .slide-subtitle {
+      max-width: 1200px;
+      margin: 8px 0 0;
+      color: var(--cp-text-muted);
+      font-size: clamp(18px, 1.5vw, 24px);
+      line-height: 1.35;
+    }
+
+    .slide-count {
+      color: var(--cp-text-muted);
+      font-family: Consolas, "Courier New", Courier, monospace;
+      font-size: 14px;
+      white-space: nowrap;
+    }
+
+    .slide-tools {
+      display: grid;
+      gap: 8px;
+      justify-items: end;
+    }
+
+    .diagram-button {
+      min-width: 112px;
+    }
+
+    .message-card {
+      margin-bottom: 16px;
+      padding: 13px 16px;
+      border-left: 5px solid var(--cp-success);
+      border-radius: 0.625rem;
+      background: var(--cp-surface-soft);
+    }
+
+    .message-label {
+      margin: 0 0 6px;
+      color: var(--cp-success);
+      font-size: 13px;
+      font-weight: 750;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .message-text {
+      margin: 0;
+      font-size: clamp(19px, 1.45vw, 24px);
+      font-weight: 650;
+      line-height: 1.35;
+    }
+
+    .slide-grid {
+      display: grid;
+      flex: 1;
+      grid-template-areas:
+        "shows live evidence"
+        "actions actions actions"
+        "talk talk talk";
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      grid-template-rows: minmax(0, 1fr) 64px 128px;
+      column-gap: 16px;
+      row-gap: 12px;
+      align-items: stretch;
+      min-height: 0;
+    }
+
+    .slide-grid.planes-grid {
+      grid-template-areas:
+        "shows shows live"
+        "actions actions actions"
+        "talk talk talk";
+      grid-template-rows: minmax(0, 1fr) 64px 128px;
+    }
+
+    .grid-shows {
+      grid-area: shows;
+    }
+
+    .grid-live {
+      grid-area: live;
+    }
+
+    .grid-evidence {
+      grid-area: evidence;
+    }
+
+    .grid-talk {
+      grid-area: talk;
+    }
+
+    .card {
+      height: 100%;
+      padding: 14px 16px;
+      border: 1px solid var(--cp-border);
+      border-radius: 16px;
+      background: var(--cp-bg-elevated);
+      box-shadow: 0 0 2px var(--cp-border), 0 1px 2px var(--cp-border);
+    }
+
+    .card h2,
+    .card h3 {
+      margin: 0 0 7px;
+    }
+
+    .card h2 {
+      font-size: 24px;
+    }
+
+    .card h3 {
+      font-size: 20px;
+    }
+
+    .card p {
+      margin: 0 0 6px;
+      font-size: 22px;
+      line-height: 1.3;
+    }
+
+    .card p:last-child {
+      margin-bottom: 0;
+    }
+
+    .clean-list,
+    .step-list {
+      display: grid;
+      gap: 4px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .clean-list li {
+      position: relative;
+      padding-left: 20px;
+      font-size: 22px;
+      line-height: 1.3;
+    }
+
+    .grid-shows h2,
+    .grid-live h2,
+    .grid-evidence h2 {
+      font-size: clamp(17px, 1.1vw, 19px);
+    }
+
+    .grid-shows .clean-list li,
+    .grid-live .clean-list li,
+    .grid-evidence .clean-list li {
+      font-size: clamp(15px, 0.95vw, 17px);
+      line-height: 1.22;
+    }
+
+    .clean-list li::before {
+      position: absolute;
+      left: 0;
+      color: var(--cp-link);
+      content: "•";
+      font-weight: 800;
+    }
+
+    .step-list {
+      counter-reset: steps;
+    }
+
+    .step-list li {
+      display: grid;
+      grid-template-columns: 30px minmax(0, 1fr);
+      gap: 8px;
+      align-items: start;
+      font-size: 22px;
+      line-height: 1.3;
+      counter-increment: steps;
+    }
+
+    .step-list li::before {
+      display: grid;
+      width: 24px;
+      height: 24px;
+      place-items: center;
+      border-radius: 0.625rem;
+      background: var(--cp-link);
+      color: var(--cp-surface);
+      content: counter(steps);
+      font-size: 13px;
+      font-weight: 800;
+    }
+
+    .talk-track {
+      height: 100%;
+      padding: 10px 16px;
+      border: 1px solid var(--cp-border);
+      border-left: 4px solid var(--cp-link);
+      border-radius: 16px;
+      background: var(--cp-surface);
+      font-size: 22px;
+      line-height: 1.35;
+    }
+
+    .talk-track::before {
+      display: block;
+      margin-bottom: 8px;
+      color: var(--cp-link);
+      content: "WHY THIS MATTERS";
+      font-size: 15px;
+      font-weight: 750;
+      letter-spacing: 0.08em;
+    }
+
+    .links {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .button,
+    .link-button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 38px;
+      padding: 8px 12px;
+      border: 1px solid var(--cp-border-strong);
+      border-radius: 0.625rem;
+      background: var(--cp-surface);
+      color: var(--cp-text);
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 650;
+      line-height: 1.2;
+      text-decoration: none;
+    }
+
+    .button:hover,
+    .link-button:hover {
+      border-color: var(--cp-link);
+      color: var(--cp-link);
+    }
+
+    .button.primary,
+    .link-button.primary {
+      border-color: var(--cp-link);
+      background: var(--cp-link);
+      color: var(--cp-surface);
+    }
+
+    .button.primary:hover,
+    .link-button.primary:hover {
+      border-color: var(--cp-link);
+      background: var(--cp-surface);
+      color: var(--cp-link);
+    }
+
+    .button.ghost {
+      border-color: transparent;
+      background: transparent;
+    }
+
+    .evidence-list li::before {
+      color: var(--cp-success);
+      content: "✓";
+    }
+
+    .fallback {
+      border-left: 4px solid var(--cp-warning);
+    }
+
+    .query-card {
+      grid-column: 1 / -1;
+      padding: 0;
+      overflow: hidden;
+    }
+
+    .query-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--cp-border);
+      background: var(--cp-surface-soft);
+    }
+
+    .query-title {
+      margin: 0;
+      font-size: 14px;
+      font-weight: 700;
+    }
+
+    pre {
+      margin: 0;
+      padding: 18px;
+      overflow: auto;
+      background: var(--cp-bg-elevated);
+      color: var(--cp-text);
+      font-family: Consolas, "Courier New", Courier, monospace;
+      font-size: 13px;
+      line-height: 1.55;
+      white-space: pre;
+    }
+
+    .query-summary {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      width: 100%;
+      min-height: 44px;
+      margin-top: auto;
+      padding: 6px 10px;
+      border: 1px solid var(--cp-border);
+      border-radius: 0.625rem;
+      background: var(--cp-surface-soft);
+    }
+
+    .query-summary .button,
+    .query-summary .link-button {
+      min-height: 32px;
+      padding: 5px 9px;
+      font-size: 13px;
+    }
+
+    .slide-actions {
+      grid-area: actions;
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      gap: 12px;
+      align-items: center;
+      height: 100%;
+      padding: 8px 12px;
+      border: 1px solid var(--cp-border);
+      border-radius: 16px;
+      background: var(--cp-bg-elevated);
+      box-shadow: 0 0 2px var(--cp-border), 0 1px 2px var(--cp-border);
+    }
+
+    .slide-actions h2 {
+      margin: 0;
+      font-size: 16px;
+      white-space: nowrap;
+    }
+
+    .slide-actions .links {
+      flex-wrap: nowrap;
+    }
+
+    .slide-actions .link-button {
+      min-height: 32px;
+      padding: 5px 9px;
+      font-size: 13px;
+    }
+
+    .slide-actions .query-summary {
+      width: auto;
+      min-height: 0;
+      margin: 0;
+      padding: 0;
+      border: 0;
+      background: transparent;
+    }
+
+    .slide-actions .query-summary p {
+      display: none;
+    }
+
+    .query-summary p {
+      margin: 0;
+      color: var(--cp-text-muted);
+      font-size: 14px;
+    }
+
+    code {
+      font-family: Consolas, "Courier New", Courier, monospace;
+    }
+
+    .two-plane {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+      height: 100%;
+    }
+
+    .plane {
+      height: 100%;
+      padding: 16px;
+      border: 1px solid var(--cp-border);
+      border-radius: 16px;
+      background: var(--cp-bg-elevated);
+    }
+
+    .plane-title {
+      margin: 0 0 10px;
+      color: var(--cp-link);
+      font-size: 22px;
+    }
+
+    .plane-question {
+      margin: 0 0 14px;
+      font-size: 20px;
+      font-weight: 650;
+      line-height: 1.35;
+    }
+
+    .footer {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      gap: 8px;
+      align-items: center;
+      min-height: 48px;
+      padding: 5px 10px;
+      border-top: 1px solid var(--cp-border);
+      background: var(--cp-bg-elevated);
+    }
+
+    .footer-left,
+    .footer-right {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .footer-right {
+      justify-content: flex-end;
+    }
+
+    .footer-status {
+      display: none;
+    }
+
+    .query-modal,
+    .diagram-modal {
+      position: fixed;
+      inset: 0;
+      z-index: 30;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      background: var(--cp-overlay);
+    }
+
+    .query-modal[hidden],
+    .diagram-modal[hidden] {
+      display: none;
+    }
+
+    .query-dialog,
+    .diagram-dialog {
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr);
+      width: min(1000px, 94vw);
+      max-height: 86vh;
+      overflow: hidden;
+      border: 1px solid var(--cp-border-strong);
+      border-radius: 16px;
+      background: var(--cp-surface);
+      box-shadow: var(--cp-shadow);
+    }
+
+    .diagram-dialog {
+      width: min(1600px, 96vw);
+      max-height: 92vh;
+    }
+
+    .query-dialog-header,
+    .diagram-dialog-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--cp-border);
+    }
+
+    .query-dialog-header h2,
+    .diagram-dialog-header h2 {
+      margin: 0;
+      font-size: 18px;
+    }
+
+    .query-dialog pre {
+      min-height: 0;
+      overflow: auto;
+    }
+
+    .diagram-canvas {
+      display: grid;
+      min-height: 0;
+      place-items: center;
+      overflow: auto;
+      padding: 16px;
+      background: #ffffff;
+    }
+
+    .diagram-image {
+      display: block;
+      max-width: 100%;
+      max-height: 78vh;
+      object-fit: contain;
+    }
+
+    .toast {
+      position: fixed;
+      right: 24px;
+      bottom: 88px;
+      z-index: 20;
+      max-width: 360px;
+      padding: 12px 16px;
+      border: 1px solid var(--cp-border-strong);
+      border-radius: 0.625rem;
+      background: var(--cp-panel-strong);
+      color: var(--cp-text);
+      box-shadow: var(--cp-shadow);
+      opacity: 0;
+      pointer-events: none;
+      transform: translateY(8px);
+      transition: opacity 160ms ease, transform 160ms ease;
+    }
+
+    .toast.show {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    .visually-hidden {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      border: 0;
+      white-space: nowrap;
+    }
+
+    @media (max-width: 980px) {
+      .message-pill {
+        display: none;
+      }
+
+      .slide-grid,
+      .two-plane {
+        grid-template-columns: 1fr;
+      }
+
+      .slide-grid,
+      .slide-grid.planes-grid {
+        grid-template-areas:
+          "shows"
+          "live"
+          "evidence"
+          "talk";
+        grid-template-rows: auto;
+      }
+
+      .slide-actions {
+        grid-template-columns: 1fr;
+        height: auto;
+      }
+
+      .slide-actions .links {
+        flex-wrap: wrap;
+      }
+    }
+
+    @media (max-width: 720px) {
+      .slide {
+        padding: 14px;
+      }
+
+      .slide-header {
+        grid-template-columns: 1fr;
+      }
+
+      .message-pill {
+        display: none;
+      }
+    }
+
+    @media (max-height: 820px) {
+      .topbar {
+        min-height: 52px;
+      }
+
+      .brand-title {
+        font-size: 19px;
+      }
+
+      .slide {
+        padding: 12px 16px;
+      }
+
+      .slide-header {
+        margin-bottom: 9px;
+        padding-bottom: 8px;
+      }
+
+      .message-card {
+        margin-bottom: 8px;
+        padding: 8px 11px;
+      }
+
+      .card {
+        padding: 8px 10px;
+      }
+
+      .talk-track {
+        padding: 9px 11px;
+      }
+    }
+
+    @media print {
+      body {
+        overflow: visible;
+      }
+
+      .topbar,
+      .progress-track,
+      .rail,
+      .footer,
+      .toast {
+        display: none;
+      }
+
+      .app,
+      .workspace {
+        display: block;
+        height: auto;
+      }
+
+      .stage {
+        overflow: visible;
+        padding: 0;
+      }
+
+      .slide {
+        min-height: 0;
+        border: 0;
+        box-shadow: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">
+        <p class="brand-kicker">Microsoft - AI Observability Demo</p>
+        <p class="brand-title">AI Observability and Cost Management</p>
+      </div>
+      <div class="message-pill" id="configuration-status">
+        Performance · Usage · Attribution · Cost · Reconciliation
+      </div>
+      <div class="top-actions">
+        <label class="range-control" for="monitoring-range">
+          Time range
+          <select id="monitoring-range">
+            <option value="1h">1 hour</option>
+            <option value="6h">6 hours</option>
+            <option value="24h">24 hours</option>
+            <option value="7d">7 days</option>
+          </select>
+        </label>
+        <button class="button ghost" id="theme-button" type="button">Theme</button>
+        <button class="button ghost" id="fullscreen-button" type="button">Full screen</button>
+      </div>
+    </header>
+
+    <div class="progress-track" aria-hidden="true">
+      <div class="progress-bar" id="progress-bar"></div>
+    </div>
+
+    <div class="workspace">
+      <main class="stage" id="stage" tabindex="-1">
+        <article class="slide" id="slide" aria-live="polite"></article>
+      </main>
+    </div>
+
+    <footer class="footer">
+      <div class="footer-left">
+        <button class="button" id="previous-button" type="button">← Previous</button>
+      </div>
+      <nav class="rail" aria-label="Presentation slides" id="rail"></nav>
+      <div class="footer-status" id="footer-status"></div>
+      <div class="footer-right">
+        <button class="button" id="next-button" type="button">Next →</button>
+        <button class="button primary" id="open-primary-button" type="button">Open live view</button>
+      </div>
+    </footer>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <div class="query-modal" id="query-modal" hidden>
+    <section class="query-dialog" role="dialog" aria-modal="true" aria-labelledby="query-dialog-title">
+      <header class="query-dialog-header">
+        <h2 id="query-dialog-title">KQL</h2>
+        <div class="links">
+          <button class="button" id="query-copy-button" type="button">Copy KQL</button>
+          <button class="button primary" id="query-close-button" type="button">Close</button>
+        </div>
+      </header>
+      <pre><code id="query-dialog-code"></code></pre>
+    </section>
+  </div>
+  <div class="diagram-modal" id="diagram-modal" hidden>
+    <section class="diagram-dialog" role="dialog" aria-modal="true" aria-labelledby="diagram-dialog-title">
+      <header class="diagram-dialog-header">
+        <h2 id="diagram-dialog-title">Architecture diagram</h2>
+        <div class="links">
+          <a class="button" id="diagram-source-link">Edit Excalidraw source</a>
+          <button class="button primary" id="diagram-close-button" type="button">Close</button>
+        </div>
+      </header>
+      <div class="diagram-canvas">
+        <img class="diagram-image" id="diagram-image" alt="">
+      </div>
+    </section>
+  </div>
+  <span class="visually-hidden" id="screen-reader-status" aria-live="polite"></span>
+
+  <script>
+    const deckParams = new URLSearchParams(window.location.search);
+
+    function readDeploymentValue(name) {
+      const suppliedValue = deckParams.get(name);
+      const storageKey = `aiObservabilityDemo.${name}`;
+      try {
+        if (suppliedValue) {
+          window.localStorage.setItem(storageKey, suppliedValue);
+          return suppliedValue;
+        }
+        return window.localStorage.getItem(storageKey) || "";
+      } catch {
+        return suppliedValue || "";
+      }
+    }
+
+    const deploymentConfig = {
+      tenantId: readDeploymentValue("tenantId"),
+      subscriptionId: readDeploymentValue("subscriptionId"),
+      resourceGroup: readDeploymentValue("resourceGroup"),
+      resourceSuffix: readDeploymentValue("suffix"),
+      workbookId: readDeploymentValue("workbookId")
+    };
+
+    const missingConfig = Object.entries(deploymentConfig)
+      .filter(([, value]) => !value)
+      .map(([name]) => name);
+    const hasDeploymentConfig = missingConfig.length === 0;
+    if (!hasDeploymentConfig) {
+      document.getElementById("configuration-status").textContent =
+        "Static guide - deployment links hidden";
+    }
+
+    const resourceGroupId =
+      `/subscriptions/${deploymentConfig.subscriptionId}` +
+      `/resourceGroups/${deploymentConfig.resourceGroup}`;
+    const foundryName = `ai-observability-demo-foundry-${deploymentConfig.resourceSuffix}`;
+    const appInsightsName = `ai-observability-demo-appi-${deploymentConfig.resourceSuffix}`;
+
+    const deployment = {
+      tenantId: deploymentConfig.tenantId,
+      subscriptionId: deploymentConfig.subscriptionId,
+      resourceGroup: deploymentConfig.resourceGroup,
+      resourceIds: {
+        resourceGroup: resourceGroupId,
+        apim: `${resourceGroupId}/providers/Microsoft.ApiManagement/service/ai-observability-demo-apim-${deploymentConfig.resourceSuffix}`,
+        foundry: `${resourceGroupId}/providers/Microsoft.CognitiveServices/accounts/${foundryName}`,
+        modelProject: `${resourceGroupId}/providers/Microsoft.CognitiveServices/accounts/${foundryName}/projects/governed-model-comparison`,
+        codeProject: `${resourceGroupId}/providers/Microsoft.CognitiveServices/accounts/${foundryName}/projects/scientific-code-explainer`,
+        appInsights: `${resourceGroupId}/providers/Microsoft.Insights/components/${appInsightsName}`,
+        logAnalytics: `${resourceGroupId}/providers/Microsoft.OperationalInsights/workspaces/ai-observability-demo-law-${deploymentConfig.resourceSuffix}`,
+        workbook: `${resourceGroupId}/providers/Microsoft.Insights/workbooks/${deploymentConfig.workbookId}`,
+        grafana: `${resourceGroupId}/providers/Microsoft.Dashboard/dashboards/AI-Observability-and-Cost`,
+        storage: `${resourceGroupId}/providers/Microsoft.Storage/storageAccounts/aiobservabilityst${deploymentConfig.resourceSuffix}`,
+        appService: `${resourceGroupId}/providers/Microsoft.Web/sites/ai-observability-demo-web-${deploymentConfig.resourceSuffix}`,
+        apiCenter: `${resourceGroupId}/providers/Microsoft.ApiCenter/services/ai-observability-demo-apic-${deploymentConfig.resourceSuffix}`,
+        budget: `${resourceGroupId}/providers/Microsoft.Consumption/budgets/ai-observability-demo-monthly-budget`,
+        export: `${resourceGroupId}/providers/Microsoft.CostManagement/exports/ai-observability-demo-daily-actual-cost`,
+        failureAlert: `${resourceGroupId}/providers/microsoft.alertsmanagement/smartDetectorAlertRules/Failure Anomalies - ${appInsightsName}`
+      },
+      urls: {
+        web: hasDeploymentConfig
+          ? `https://ai-observability-demo-web-${deploymentConfig.resourceSuffix}.azurewebsites.net`
+          : "",
+        workbookName: "AI Observability usage and cost governance"
+      }
+    };
+
+    const portalHost = "https://ms.portal.azure.com";
+    const monitoringRanges = {
+      "1h": { label: "1 hour", durationMs: 3600000, timespan: "PT1H", kql: "1h" },
+      "6h": { label: "6 hours", durationMs: 21600000, timespan: "PT6H", kql: "6h" },
+      "24h": { label: "24 hours", durationMs: 86400000, timespan: "P1D", kql: "24h" },
+      "7d": { label: "7 days", durationMs: 604800000, timespan: "P7D", kql: "7d" }
+    };
+    let monitoringRangeKey = Object.hasOwn(
+      monitoringRanges,
+      deckParams.get("range") || ""
+    )
+      ? deckParams.get("range")
+      : "24h";
+
+    const selectedMonitoringRange = () => monitoringRanges[monitoringRangeKey];
+
+    const portalResource = (resourceId, section = "overview") =>
+      hasDeploymentConfig
+        ? `${portalHost}/#@${deployment.tenantId}/resource${resourceId}/${section}`
+        : "";
+
+    const foundryPortal = (path, resourceId) =>
+      hasDeploymentConfig
+        ? `https://ai.azure.com/${path}?wsid=${encodeURIComponent(resourceId)}` +
+          `&tid=${encodeURIComponent(deployment.tenantId)}`
+        : "";
+
+    const repoFile = (relativePath) => {
+      return new URL(`../${relativePath}`, window.location.href).href;
+    };
+
+    const encodedBladeResourceId = (resourceId) =>
+      encodeURIComponent(encodeURIComponent(resourceId));
+
+    const queryForSelectedRange = (query) =>
+      query.replaceAll("ago(24h)", `ago(${selectedMonitoringRange().kql})`);
+
+    function appInsightsSearchUrl() {
+      if (!hasDeploymentConfig) return "";
+      const range = selectedMonitoringRange();
+      const end = new Date();
+      const start = new Date(end.getTime() - range.durationMs);
+      const eventTypes = [
+        { value: "availabilityResult", tableName: "availabilityResults", label: "Availability" },
+        { value: "request", tableName: "requests", label: "Request" },
+        { value: "exception", tableName: "exceptions", label: "Exception" },
+        { value: "pageView", tableName: "pageViews", label: "Page View" },
+        { value: "trace", tableName: "traces", label: "Trace" },
+        { value: "customEvent", tableName: "customEvents", label: "Custom Event" },
+        { value: "dependency", tableName: "dependencies", label: "Dependency" }
+      ];
+      const bladeInputs = {
+        tables: eventTypes.map((eventType) => eventType.tableName),
+        timeContextWhereClause:
+          `| where timestamp > datetime("${start.toISOString()}") ` +
+          `and timestamp < datetime("${end.toISOString()}")`,
+        filterWhereClause: "| order by timestamp desc",
+        originalParams: {
+          eventTypes,
+          timeContext: {
+            durationMs: range.durationMs
+          },
+          filter: [],
+          searchPhrase: {
+            originalPhrase: "",
+            _tokens: []
+          },
+          sort: "desc"
+        }
+      };
+      return `${portalHost}/#blade/AppInsightsExtension/BladeRedirect/BladeName/searchV1` +
+        `/ResourceId/${encodedBladeResourceId(deployment.resourceIds.appInsights)}` +
+        `/BladeInputs/${encodeURIComponent(JSON.stringify(bladeInputs))}`;
+    }
+
+    function azureLogsUrl(resourceId, query) {
+      if (!hasDeploymentConfig) return "";
+      return `${portalHost}/#@${deployment.tenantId}` +
+        `/blade/Microsoft_Azure_Monitoring_Logs/LogsBlade` +
+        `/resourceId/${encodeURIComponent(resourceId)}` +
+        `/source/LogsBlade.AnalyticsShareLinkToQuery` +
+        `/query/${encodeURIComponent(queryForSelectedRange(query))}` +
+        `/timespan/${selectedMonitoringRange().timespan}`;
+    }
+
+    const webUrl = (path = "") =>
+      hasDeploymentConfig ? `${deployment.urls.web}${path}` : "";
+
+    const links = {
+      webHome: webUrl(),
+      health: webUrl("/healthz"),
+      modelComparison: webUrl("/model-comparison"),
+      codeExplainer: webUrl("/scientific-code-explainer"),
+      weatherAgentApp: webUrl("/weather-agent"),
+      resourceGroup: portalResource(deployment.resourceIds.resourceGroup),
+      workbook: portalResource(deployment.resourceIds.workbook),
+      grafana: portalResource(deployment.resourceIds.grafana),
+      appInsights: () => appInsightsSearchUrl(),
+      appInsightsSearch: () => appInsightsSearchUrl(),
+      appInsightsLogs: () => azureLogsUrl(deployment.resourceIds.appInsights, queries.attribution),
+      appInsightsPerformance: portalResource(deployment.resourceIds.appInsights, "performance"),
+      appInsightsFailures: portalResource(deployment.resourceIds.appInsights, "failures"),
+      appInsightsMap: portalResource(deployment.resourceIds.appInsights, "applicationMap"),
+      logAnalytics: portalResource(deployment.resourceIds.logAnalytics),
+      logAnalyticsLogs: () => azureLogsUrl(deployment.resourceIds.logAnalytics, queries.gatewayLogs),
+      apimGatewayLogs: () => azureLogsUrl(deployment.resourceIds.logAnalytics, queries.gatewayReliability),
+      apim: portalResource(deployment.resourceIds.apim),
+      apimAnalytics: portalResource(deployment.resourceIds.apim, "apim-analytics"),
+      apimApis: portalResource(deployment.resourceIds.apim, "apis"),
+      apimMetrics: portalResource(deployment.resourceIds.apim, "metrics"),
+      foundryPortal: foundryPortal("foundryResource/overview", deployment.resourceIds.foundry),
+      foundryObservability: foundryPortal("resource/observability", deployment.resourceIds.foundry),
+      foundryDeployments: foundryPortal("project/overview", deployment.resourceIds.modelProject),
+      claudeMonitoring: foundryPortal("project/overview", deployment.resourceIds.modelProject),
+      weatherAgent: foundryPortal("project/overview", deployment.resourceIds.modelProject),
+      foundryGuardrails: foundryPortal("resource/contentfilters/overview", deployment.resourceIds.foundry),
+      codeProject: foundryPortal("project/overview", deployment.resourceIds.codeProject),
+      apiCenter: hasDeploymentConfig
+        ? `https://portal.azure.com/#view/Microsoft_Azure_ApiCenter/ServiceMenuBlade/~/overview/resourceId/${deployment.resourceIds.apiCenter}`
+        : "",
+      storage: portalResource(deployment.resourceIds.storage),
+      storageContainers: portalResource(deployment.resourceIds.storage, "containers"),
+      appService: portalResource(deployment.resourceIds.appService),
+      appServiceLogs: portalResource(deployment.resourceIds.appService, "logStream"),
+      budget: portalResource(
+        deployment.resourceIds.resourceGroup,
+        "providers/Microsoft.Consumption/budgets"
+      ),
+      costExports: portalResource(
+        deployment.resourceIds.resourceGroup,
+        "providers/Microsoft.CostManagement/exports"
+      ),
+      costAnalysis: portalResource(deployment.resourceIds.resourceGroup, "costAnalysis"),
+      failureAlert: portalResource(deployment.resourceIds.failureAlert),
+      protectedCodeGuide: "https://learn.microsoft.com/azure/ai-services/content-safety/quickstart-protected-material-code",
+      promptShieldGuide: "https://learn.microsoft.com/azure/foundry/openai/concepts/content-filter-prompt-shields",
+      landingZone: "https://azure.github.io/AI-Landing-Zones/architecture/design-checklist/",
+      architectureDoc: repoFile("docs/architecture.md"),
+      conceptsDoc: repoFile("docs/observability-and-cost-management.md"),
+      policyReadme: repoFile("apim-policies/README.md"),
+      runbook: repoFile("docs/RUNBOOK.md"),
+      scenarioGuide: repoFile("docs/scientific-software-engineering-guide.md")
+    };
+
+    const queries = {
+      attribution: `customMetrics
+| where timestamp > ago(24h)
+| where name == "Total Tokens"
+| extend
+    Team = tostring(customDimensions["Team"]),
+    User = tostring(customDimensions["User"]),
+    Model = tostring(customDimensions["Model"]),
+    Project = tostring(customDimensions["Project"])
+| summarize
+    Requests = toint(sum(valueCount)),
+    Tokens = toint(sum(valueSum))
+  by Team, User, Model, Project
+| order by Tokens desc`,
+      tokenTrend: `customMetrics
+| where timestamp > ago(24h)
+| where name in ("Prompt Tokens", "Completion Tokens", "Total Tokens")
+| extend
+    Model = tostring(customDimensions["Model"]),
+    Team = tostring(customDimensions["Team"])
+| summarize Tokens = sum(valueSum) by bin(timestamp, 15m), Model, Team, name
+| order by timestamp asc`,
+      gatewayReliability: `union isfuzzy=true
+(
+  ApiManagementGatewayLogs
+  | project
+      TimeGenerated,
+      ResponseCode = toint(ResponseCode),
+      DurationMilliseconds = tolong(TotalTime),
+      RequestUrl = tostring(Url)
+),
+(
+  AzureDiagnostics
+  | where ResourceProvider == "MICROSOFT.APIMANAGEMENT"
+  | where Category == "GatewayLogs"
+  | project
+      TimeGenerated,
+      ResponseCode = toint(responseCode_d),
+      DurationMilliseconds = tolong(DurationMs),
+      RequestUrl = tostring(url_s)
+)
+| where TimeGenerated > ago(24h)
+| where RequestUrl has "/models/" or RequestUrl has "/guardrails/"
+| extend Route = tostring(parse_url(RequestUrl).Path)
+| summarize
+    Requests = count(),
+    SuccessRate = round(100.0 * countif(ResponseCode between (200 .. 399)) / count(), 2),
+    P50Milliseconds = round(percentile(DurationMilliseconds, 50), 0),
+    P95Milliseconds = round(percentile(DurationMilliseconds, 95), 0)
+  by Route, ResponseCode
+| order by Requests desc`,
+      dependencies: `AppDependencies
+| where TimeGenerated > ago(24h)
+| summarize
+    Dependencies = count(),
+    Failures = countif(Success == false),
+    P95Milliseconds = round(percentile(DurationMs, 95), 0)
+  by AppRoleName, Target
+| order by Dependencies desc`,
+      foundryDiagnostics: `AzureDiagnostics
+| where TimeGenerated > ago(24h)
+| where ResourceProvider == "MICROSOFT.COGNITIVESERVICES"
+| summarize Rows = count() by Category, bin(TimeGenerated, 15m)
+| order by TimeGenerated desc`,
+      gatewayLogs: `union isfuzzy=true
+(
+  ApiManagementGatewayLogs
+  | project TimeGenerated, ResponseCode = toint(ResponseCode)
+),
+(
+  AzureDiagnostics
+  | where ResourceProvider == "MICROSOFT.APIMANAGEMENT"
+  | where Category == "GatewayLogs"
+  | project TimeGenerated, ResponseCode = toint(responseCode_d)
+)
+| where TimeGenerated > ago(24h)
+| summarize Requests = count() by ResponseCode, bin(TimeGenerated, 5m)
+| order by TimeGenerated desc`,
+      dataQuality: `customMetrics
+| where timestamp > ago(24h)
+| where name == "Total Tokens"
+| extend
+    Team = tostring(customDimensions["Team"]),
+    User = tostring(customDimensions["User"]),
+    Model = tostring(customDimensions["Model"]),
+    Project = tostring(customDimensions["Project"])
+| summarize
+    LastMetricUtc = max(timestamp),
+    UnknownTeam = countif(isempty(Team) or Team == "unknown"),
+    UnknownUser = countif(isempty(User) or User == "unknown"),
+    UnknownModel = countif(isempty(Model) or Model == "unknown"),
+    UnknownProject = countif(isempty(Project) or Project == "unknown")`,
+      guardrails: `let applicationDecisions = customEvents
+| where timestamp > ago(24h)
+| where name == "guardrail.decision"
+| extend
+    Guardrail = tostring(customDimensions["guardrail"]),
+    Stage = tostring(customDimensions["stage"]),
+    Outcome = tostring(customDimensions["outcome"]),
+    CorrelationId = tostring(customDimensions["correlationId"])
+| project timestamp, Source = "Application", Guardrail, Stage, Outcome, CorrelationId;
+let gatewayBlocks = requests
+| where timestamp > ago(24h)
+| where resultCode in ("400", "403")
+| where url has "/models/" or url has "/guardrails/"
+| project
+    timestamp,
+    Source = "Gateway",
+    Guardrail = iff(url has "/guardrails/protected-code/", "protected_material_code", "gateway_content_safety"),
+    Stage = "request",
+    Outcome = "blocked",
+    CorrelationId = operation_Id;
+union applicationDecisions, gatewayBlocks
+| order by timestamp desc`,
+      webHealth: `AppRequests
+| where TimeGenerated > ago(24h)
+| summarize
+    Requests = count(),
+    Failures = countif(Success == false),
+    P95Milliseconds = round(percentile(DurationMs, 95), 0)
+  by AppRoleName
+| order by Requests desc`,
+      quota: `requests
+| where timestamp > ago(24h)
+| where resultCode == "429"
+| where url has "/models/"
+| extend Model = iff(url has "/models/claude/", "claude-opus-5", "gpt-5.4")
+| summarize QuotaResponses = count() by Model, bin(timestamp, 5m)
+| order by timestamp desc`
+    };
+
+    const sections = [
+      { name: "Platform operations", range: [0, 12] },
+      { name: "Governance controls", range: [13, 14] }
+    ];
+
+    const slides = [
+      {
+        phase: "Set the frame",
+        duration: "3 min",
+        title: "What the platform should answer",
+        subtitle: "Performance, usage, cost, and monitoring for Foundry-hosted models.",
+        diagram: {
+          title: "AI Observability Demo architecture",
+          src: "../docs/diagrams/ai-observability-architecture.png",
+          source: "docs/diagrams/ai-observability-architecture.excalidraw",
+          alt: "AI Observability Demo architecture from users and the web app through APIM, Foundry, monitoring, and FinOps."
+        },
+        message: "Who used which model, how many tokens did they consume, how did it perform, and what did Azure bill?",
+        proves: [
+          "The operating model separates observability and cost management from model-quality evaluation.",
+          "A small scientific code workload creates representative, observable traffic.",
+          "Usage, performance, control, and billed cost use a common workload scope."
+        ],
+        talk: "The platform answers one connected question: who used which model, how many tokens did they consume, how did it perform, and what did Azure bill? One request connects the application, gateway, models, operational telemetry, and billed cost.",
+        steps: [
+          "The web health endpoint confirms that the application is available.",
+          "The resource group defines the deployed workload scope.",
+          "The workbook, monitoring, gateway, model, and cost views use this same scope."
+        ],
+        links: [
+          ["Open web health", links.health, "primary"],
+          ["Open resource group", links.resourceGroup],
+          ["Open runbook", links.runbook],
+          ["Open concepts document", links.conceptsDoc]
+        ],
+        evidence: [
+          "The web application is healthy.",
+          "All relevant resources are inside the workload resource group.",
+          "The platform provides a clear path from usage to cost."
+        ],
+      },
+      {
+        phase: "Core story",
+        duration: "3 min",
+        title: "Two planes, one operating model",
+        subtitle: "Operational usage and financial cost answer related but different questions.",
+        diagram: {
+          title: "AI Observability Demo usage and cost flow",
+          src: "../docs/diagrams/cost-governance-flow.png",
+          source: "docs/diagrams/cost-governance-flow.excalidraw",
+          alt: "Operational usage and financial cost flows connected through APIM, models, Cost Management, and Grafana."
+        },
+        message: "APIM and Foundry explain usage and control. Cost Management explains the bill.",
+        proves: [
+          "Operational telemetry answers who used which model and how the request behaved.",
+          "Cost Management answers what Azure rated and billed.",
+          "Reconciliation uses the same scope and time window without treating tokens as invoice lines."
+        ],
+        layout: "planes",
+        planes: [
+          {
+            title: "Usage and control",
+            question: "Who used what, when, and how much?",
+            items: ["APIM attribution", "Token metrics", "Latency and failures", "Quotas and guardrails"]
+          },
+          {
+            title: "Financial",
+            question: "What did Azure rate and bill?",
+            items: ["Cost Analysis", "Meters and Marketplace charges", "Budget", "Daily actual-cost export"]
+          }
+        ],
+        talk: "A token metric is not an invoice line. APIM gives immediate operational attribution and runtime control. Foundry gives model-native signals. Cost Management applies pricing, discounts, meters, and timing. Reconciliation happens across a fixed time window.",
+        steps: [
+          "The architecture connects the browser, web app, APIM, Foundry, monitoring, and cost flows.",
+          "Operational and financial data have different timing and accounting semantics.",
+          "The design supports trend reconciliation, not exact per-request invoice allocation."
+        ],
+        links: [
+          ["Open architecture document", links.architectureDoc, "primary"],
+          ["Open resource group", links.resourceGroup],
+          ["Open workbook", links.workbook]
+        ],
+        evidence: [
+          "The platform has an explicit operational telemetry path.",
+          "The platform has an explicit billing-data path.",
+          "The narrative prevents false equivalence between tokens and cost."
+        ],
+      },
+      {
+        phase: "Create evidence",
+        duration: "5 min",
+        title: "Generate one observable comparison",
+        subtitle: "One small scientific engineering task creates two governed model calls.",
+        diagram: {
+          title: "AI Observability Demo model request flow",
+          src: "../docs/diagrams/model-gateway-flow.png",
+          source: "docs/diagrams/model-gateway-flow.excalidraw",
+          alt: "Signed-in user request through the web application and APIM to GPT-5.4 and Claude Opus 5."
+        },
+        message: "The scenario is deliberately small so configuration and observability stay central.",
+        proves: [
+          "The same signed-in user can access two approved models through one gateway.",
+          "Both providers keep their native request and response contracts.",
+          "GPT-5.4 and Claude Opus 5 use their minimum supported reasoning settings.",
+          "One correlation ID ties the model comparison together."
+        ],
+        talk: "This is not a formal model benchmark. It is a controlled way to produce comparable operational signals from GPT-5.4 and Claude Opus 5.",
+        steps: [
+          "Governed Model Comparison sends one scientific Python task to both approved models.",
+          "GPT-5.4 uses low reasoning; Claude uses adaptive thinking at low effort.",
+          "Each result identifies the provider, model, token usage, latency, attribution, and quota.",
+          "A shared correlation ID connects both model results to the same comparison."
+        ],
+        links: [
+          ["Open model comparison", links.modelComparison, "primary"],
+          ["Open web home", links.webHome],
+          ["Open App Insights transaction search", links.appInsightsSearch]
+        ],
+        evidence: [
+          "Two model cards appear.",
+          "GPT-5.4 and Claude Opus 5 are identified.",
+          "The cards share one correlation ID.",
+          "Provider-reported usage and gateway quota values appear."
+        ],
+      },
+      {
+        phase: "Usage attribution",
+        duration: "5 min",
+        title: "Who used which model?",
+        subtitle: "The workbook is the main operational allocation view.",
+        message: "Attribution is a gateway capability, not an invoice feature.",
+        proves: [
+          "Research, Engineering, and signed-in user traffic can be separated.",
+          "User, model, provider, project, API, product, and subscription context is available.",
+          "The data-quality panel verifies that attribution fields are populated."
+        ],
+        talk: "APIM subscriptions establish the team context. Validated Entra identity or bounded synthetic identities establish the user context. The workbook is the operational showback view.",
+        steps: [
+          "The workbook separates usage by team, user, model, provider, project, API, product, and subscription.",
+          "The selected time range covers the generated workload traffic.",
+          "The data-quality view exposes missing or unknown attribution."
+        ],
+        links: [
+          ["Open usage workbook", links.workbook, "primary"],
+          ["Open unified Grafana dashboard", links.grafana],
+          ["Open Application Insights", links.appInsights],
+          ["Open App Insights Logs", links.appInsightsLogs]
+        ],
+        evidence: [
+          "Both teams and both models are visible.",
+          "Configured generated users are visible.",
+          "Unknown attribution values are reviewed.",
+          "The request count matches the selected traffic summary."
+        ],
+        query: {
+          title: "Token attribution",
+          text: queries.attribution
+        },
+      },
+      {
+        phase: "Token usage",
+        duration: "4 min",
+        title: "Tokens, limits, and immediate control",
+        subtitle: "Operational token controls act before delayed billing data.",
+        message: "Token metrics explain consumption. Token limits can stop a request. Budgets cannot.",
+        proves: [
+          "Input, output, and total token types are observable.",
+          "Grafana separates prompt, visible-completion, and reasoning tokens without double counting.",
+          "Per-minute and daily token limits are applied at the gateway.",
+          "Quota responses are distinct from Cost Management budget alerts."
+        ],
+        talk: "The gateway sees provider-reported usage at request time. It can enforce a shared team allowance immediately. Cost Management budgets evaluate later and are notification-only.",
+        steps: [
+          "The workbook separates input, output, and total tokens by model.",
+          "The Grafana token-composition donut adds reasoning when the standard APIM metric is nonzero.",
+          "The application returns the remaining daily quota after each call.",
+          "APIM policies apply per-minute and daily token limits.",
+          "HTTP 429 records identify quota enforcement."
+        ],
+        links: [
+          ["Open unified Grafana dashboard", links.grafana, "primary"],
+          ["Open workbook", links.workbook],
+          ["Open APIM APIs", links.apimApis],
+          ["Open APIM metrics", links.apimMetrics],
+          ["Open policy README", links.policyReadme]
+        ],
+        evidence: [
+          "Token types differ by model and request.",
+          "Daily quota remaining is returned to the app.",
+          "No quota failures are expected during normal generated traffic."
+        ],
+        query: {
+          title: "Token trend by team and model",
+          text: queries.tokenTrend
+        },
+      },
+      {
+        phase: "Gateway monitoring",
+        duration: "4 min",
+        title: "Observe the AI Gateway",
+        subtitle: "APIM is the centralized control and observability boundary.",
+        diagram: {
+          title: "AI Observability Demo model request flow",
+          src: "../docs/diagrams/model-gateway-flow.png",
+          source: "docs/diagrams/model-gateway-flow.excalidraw",
+          alt: "Shared APIM controls applied before provider-native GPT-5.4 and Claude Opus 5 model routes."
+        },
+        message: "The gateway shows request success, tail latency, backend behavior, and policy failures.",
+        proves: [
+          "APIM sees both provider routes.",
+          "Native Analytics sections show the selected traffic, including Language models.",
+          "Application Insights captures gateway requests, dependencies, and exceptions.",
+          "Resource-specific APIM logs provide request and token analytics without prompt or completion messages."
+        ],
+        talk: "The gateway is where access, attribution, quotas, model routing, and safety controls converge. We monitor rates and tail latency, not only averages.",
+        steps: [
+          "APIM Analytics shows timeline, geography, API, operation, product, subscription, user, request, and language-model views.",
+          "The Language models view shows both models, API versions, requests, and token totals.",
+          "Use the absolute Language models counters; the internal portal currently misformats its green 100% strips as 10,000%.",
+          "Response codes, P50, and P95 separate policy outcomes and show latency."
+        ],
+        links: [
+          ["Open APIM Analytics", links.apimAnalytics, "primary"],
+          ["Open unified Grafana dashboard", links.grafana],
+          ["Open APIM gateway logs", links.apimGatewayLogs],
+          ["Open usage workbook", links.workbook]
+        ],
+        evidence: [
+          "Both model routes, products, subscriptions, and APIM user owners have successful calls.",
+          "Language-model records contain token metadata and no prompt or completion messages.",
+          "P50 and P95 latency are visible.",
+          "Expected safety failures appear separately from model success."
+        ],
+        query: {
+          title: "Gateway reliability and P95 latency",
+          text: queries.gatewayReliability
+        },
+      },
+      {
+        phase: "Application monitoring",
+        duration: "4 min",
+        title: "Follow the transaction",
+        subtitle: "Application Insights joins user requests, gateway calls, dependencies, and failures.",
+        diagram: {
+          title: "AI Observability Demo transaction and trace flow",
+          src: "../docs/diagrams/transaction-trace-flow.png",
+          source: "docs/diagrams/transaction-trace-flow.excalidraw",
+          alt: "W3C trace context from the web request through APIM, Foundry, model inference, and MCP tool execution."
+        },
+        message: "Correlation turns separate telemetry records into one diagnosable request path.",
+        proves: [
+          "Web requests and APIM requests reach the same workspace-based monitoring solution.",
+          "Backend model calls appear as APIM dependencies.",
+          "Expected guardrail failures are identifiable.",
+          "Request correlation exists; persistent cross-request session metrics remain a design decision."
+        ],
+        talk: "The application uses a correlation ID and W3C correlation. Application Insights gives the request and dependency view; Log Analytics gives the broader resource-log view.",
+        steps: [
+          "Application Map shows the web and APIM components and their dependencies.",
+          "Performance separates the web and APIM roles.",
+          "Failures separates expected guardrail outcomes from defects.",
+          "Transaction search follows one correlation ID across the request path."
+        ],
+        links: [
+          ["Open Application Map", links.appInsightsMap, "primary"],
+          ["Open unified Grafana dashboard", links.grafana],
+          ["Open Performance", links.appInsightsPerformance],
+          ["Open Failures", links.appInsightsFailures],
+          ["Open Transaction search", links.appInsightsSearch]
+        ],
+        evidence: [
+          "Web and APIM roles are visible.",
+          "Foundry endpoints appear as dependencies.",
+          "Content Safety failures are explainable, not unexplained outages.",
+          "Operation IDs support request tracing without exposing session identifiers."
+        ],
+        query: {
+          title: "Dependency health",
+          text: queries.dependencies
+        },
+      },
+      {
+        phase: "Foundry monitoring",
+        duration: "4 min",
+        title: "Model-native signals in Foundry",
+        subtitle: "Foundry metrics cross-check gateway usage and model health.",
+        message: "Foundry is a model-native cross-check, not a replacement for gateway attribution.",
+        proves: [
+          "OpenAI and partner-model request and token metrics are available.",
+          "Latency, client errors, server errors, and Content Safety activity are measurable.",
+          "Both projects have Application Insights connections."
+        ],
+        talk: "The core application scenarios call model endpoints directly through APIM. The weather agent adds agent traces. Foundry resource metrics and RequestResponse logs provide the model-native operational view.",
+        steps: [
+          "Foundry metrics show requests, input tokens, output tokens, latency, and errors.",
+          "Content Safety metrics show the separate guardrail workload.",
+          "RequestResponse and Audit logs provide the model-resource investigation path.",
+          "Agent traces appear after the weather agent runs."
+        ],
+        links: [
+          ["Open Foundry resource", links.foundryPortal, "primary"],
+          ["Open unified Grafana dashboard", links.grafana],
+          ["Open Foundry observability", links.foundryObservability],
+          ["Open model deployments", links.foundryDeployments],
+          ["Open Claude monitoring", links.claudeMonitoring],
+          ["Open code explainer project", links.codeProject]
+        ],
+        evidence: [
+          "Model request and token activity is visible.",
+          "Server errors can be reviewed for the selected window.",
+          "Content Safety request metrics exist.",
+          "Agent traces remain separate from the model-only scenarios."
+        ],
+        query: {
+          title: "Foundry diagnostic categories",
+          text: queries.foundryDiagnostics
+        },
+      },
+      {
+        phase: "Log platform",
+        duration: "3 min",
+        title: "One workload log sink",
+        subtitle: "Log Analytics combines application tables and Azure resource logs.",
+        diagram: {
+          title: "AI Observability Demo architecture",
+          src: "../docs/diagrams/ai-observability-architecture.png",
+          source: "docs/diagrams/ai-observability-architecture.excalidraw",
+          alt: "Application, APIM, Foundry, cost, and inventory signals converging on Log Analytics and Grafana."
+        },
+        message: "The workload workspace supports operations while central policy destinations coexist.",
+        proves: [
+          "AppRequests and AppMetrics contain application and token signals.",
+          "App Service runtime logs are present.",
+          "ApiManagementGatewayLogs contains APIM resource logs.",
+          "AzureDiagnostics contains Foundry logs and can retain earlier APIM logs.",
+          "Storage also sends diagnostics to a centrally managed workspace."
+        ],
+        talk: "The workload workspace is the primary operational sink. The subscription also applies a central storage diagnostic policy, which is normal in a landing-zone model.",
+        steps: [
+          "The workload workspace contains application, token, runtime, gateway, and model-resource signals.",
+          "ApiManagementGatewayLogs contains APIM request records.",
+          "AzureDiagnostics contains Foundry resource logs and historical APIM records.",
+          "Prompt and completion bodies are excluded from routine gateway logging."
+        ],
+        links: [
+          ["Open Log Analytics", links.logAnalytics, "primary"],
+          ["Open unified Grafana dashboard", links.grafana],
+          ["Open Logs", links.logAnalyticsLogs],
+          ["Open App Service logs", links.appServiceLogs]
+        ],
+        evidence: [
+          "Web request and runtime tables contain data.",
+          "APIM GatewayLogs contain data.",
+          "Foundry RequestResponse and Audit logs contain data.",
+          "Prompt bodies are not retained."
+        ],
+        query: {
+          title: "APIM resource logs",
+          text: queries.gatewayLogs
+        },
+      },
+      {
+        phase: "Reconciliation",
+        duration: "4 min",
+        title: "Why the numbers differ",
+        subtitle: "Operational usage and billed cost have different semantics and refresh times.",
+        diagram: {
+          title: "AI Observability Demo usage and cost flow",
+          src: "../docs/diagrams/cost-governance-flow.png",
+          source: "docs/diagrams/cost-governance-flow.excalidraw",
+          alt: "Operational attribution and rated financial cost joined in a unified Grafana view."
+        },
+        message: "Reconcile trends over a fixed period. Do not promise request-to-invoice precision.",
+        proves: [
+          "APIM records provider-reported usage quickly.",
+          "Foundry aggregates model-native metrics.",
+          "Cost Management rates meters after pricing and discounts.",
+          "Claude consumption units and OpenAI token meters are not interchangeable."
+        ],
+        talk: "A valid reconciliation compares the same models, project, scope, and time window. Differences can come from token types, reasoning, retries, filters, caching, CCUs, discounts, rounding, and ingestion delay.",
+        steps: [
+          "A fixed time window aligns APIM, Foundry, and Cost Management data.",
+          "APIM provides request counts and provider-reported token usage.",
+          "Foundry provides model-native request and token totals.",
+          "Cost Analysis provides rated service, resource, and meter values.",
+          "Known semantic and ingestion differences explain expected variance."
+        ],
+        links: [
+          ["Open workbook", links.workbook, "primary"],
+          ["Open unified Grafana dashboard", links.grafana],
+          ["Open Foundry observability", links.foundryObservability],
+          ["Open Cost Analysis", links.costAnalysis],
+          ["Open concepts document", links.conceptsDoc]
+        ],
+        evidence: [
+          "Data lag and billing differences are explicit.",
+          "The platform supports showback.",
+          "Chargeback requires an agreed allocation rule."
+        ],
+      },
+      {
+        phase: "Financial view",
+        duration: "4 min",
+        title: "What did Azure bill?",
+        subtitle: "Cost Analysis is the financial source of truth.",
+        message: "Service, resource, meter, tag, and time explain billed cost.",
+        proves: [
+          "The workload scope includes Foundry, APIM, monitoring, storage, and web hosting.",
+          "Azure-native and Marketplace meters can be inspected separately.",
+          "Stable tags support allocation, but project-level attribution has limits."
+        ],
+        talk: "Cost Analysis contains rated usage. We group by service and meter first, then use resource and tags. Project-level Foundry attribution is preview and does not cover every Marketplace-billed model.",
+        steps: [
+          "The resource-group scope contains the complete workload cost boundary.",
+          "Service grouping separates major platform cost drivers.",
+          "Meter and resource grouping explain rated usage in more detail.",
+          "Workload, project, costCentre, and environment tags support allocation."
+        ],
+        links: [
+          ["Open Cost Analysis", links.costAnalysis, "primary"],
+          ["Open unified Grafana dashboard", links.grafana],
+          ["Open resource group", links.resourceGroup],
+          ["Open Foundry cost guidance", "https://learn.microsoft.com/azure/foundry/concepts/manage-costs"]
+        ],
+        evidence: [
+          "OpenAI, Claude/Marketplace, APIM, monitoring, storage, and App Service cost drivers can be identified.",
+          "The selected cost scope matches the workload.",
+          "The approach avoids claiming exact user-level invoice allocation."
+        ],
+      },
+      {
+        phase: "Financial controls",
+        duration: "4 min",
+        title: "Budget and daily export",
+        subtitle: "Budgets notify later; exports support FinOps analysis.",
+        message: "Financial controls complement runtime quotas. They do not replace them.",
+        proves: [
+          "A resource-group budget exists.",
+          "A managed-identity export is active.",
+          "The export identity can write to the cost-export container.",
+          "Completed export runs exist."
+        ],
+        talk: "Budget notifications require configured recipients. The export is the durable detailed cost-data path. APIM quotas remain the immediate enforcement mechanism.",
+        steps: [
+          "The resource-group budget is 500 in the billing currency.",
+          "The 70% and 90% thresholds need notification recipients before they send alerts.",
+          "The daily actual-cost export is active and has completed runs.",
+          "The private cost-exports container receives data through managed identity."
+        ],
+        links: [
+          ["Open resource-group budgets", links.budget, "primary"],
+          ["Open unified Grafana dashboard", links.grafana],
+          ["Open resource-group exports", links.costExports],
+          ["Open storage containers", links.storageContainers]
+        ],
+        evidence: [
+          "Budget amount is 500 in the billing currency.",
+          "At least one recent export run completed.",
+          "The export uses managed identity and Storage Blob Data Contributor.",
+          "Shared-key and public network access are disabled."
+        ],
+      },
+      {
+        phase: "Agent governance",
+        duration: "3 min",
+        title: "Weather forecasting agent with MCP",
+        subtitle: "A Foundry prompt agent discovers and calls one authenticated, read-only weather tool.",
+        diagram: {
+          title: "AI Observability Demo agent governance flow",
+          src: "../docs/diagrams/weather-agent-attribution-flow.png",
+          source: "docs/diagrams/weather-agent-attribution-flow.excalidraw",
+          alt: "Client request through the APIM Agent API and Foundry prompt agent to APIM model and MCP endpoints with distinct attribution."
+        },
+        message: "MCP separates agent instructions from a governed tool endpoint and its external data source.",
+        proves: [
+          "The prompt agent uses GPT-5.4 with low reasoning, its lowest nonzero supported setting.",
+          "The agent can call only get_weather_forecast.",
+          "Foundry stores an APIM subscription key, not the weather backend key.",
+          "The weather tool is read-only and does not expose its key."
+        ],
+        talk: "The prompt agent uses MCP without adding a separate application or custom function-calling contract. The festival scenario produces a realistic operational weather assessment with distinct user, agent, model, and tool attribution.",
+        steps: [
+          "Open the signed-in weather agent page.",
+          "Select Plan Balado festival operations for the Friday-to-Monday assessment.",
+          "The agent calls get_weather_forecast through the authenticated MCP connection.",
+          "Review the returned location, forecast periods, severe-weather risks, and mitigations."
+        ],
+        links: [
+          ["Open weather agent", links.weatherAgentApp, "primary"],
+          ["Open Foundry agents", links.weatherAgent],
+          ["Open unified Grafana dashboard", links.grafana],
+          ["Open MCP guidance", "https://learn.microsoft.com/azure/foundry/agents/how-to/tools/model-context-protocol"]
+        ],
+        evidence: [
+          "The response contains a realistic operational forecast assessment.",
+          "The agent does not name or cite the tool provider.",
+          "Only the allow-listed read-only MCP tool is available.",
+          "Agent and MCP calls appear in the platform monitoring views."
+        ],
+      },
+      {
+        phase: "Governance controls",
+        duration: "3 min",
+        title: "Prompt Shield",
+        subtitle: "A user prompt attempts to replace system instructions.",
+        message: "The Foundry policy sets Prompt Shields for User Prompts to Filter mode and blocks the prompt attack.",
+        proves: [
+          "The applied Foundry RAI policy enables Prompt Shields in Filter mode.",
+          "The blocked request remains observable.",
+          "The UI describes a safety decision without accusing the user.",
+          "The control provides technical mitigation, not contractual eligibility."
+        ],
+        talk: "Prompt Shield blocks the attack, records the decision, and exposes the outcome through the same operational monitoring path.",
+        steps: [
+          "The Foundry guardrail view shows the applied Filter-mode configuration.",
+          "The Prompt Shield sample attempts to replace the system instructions.",
+          "The gateway blocks the prompt before a normal model response is returned.",
+          "The application presents the block as a safety decision.",
+          "The workbook records the guardrail outcome without the prompt body."
+        ],
+        links: [
+          ["Open Foundry guardrails", links.foundryGuardrails, "primary"],
+          ["Open code explainer", links.codeExplainer],
+          ["Open workbook", links.workbook],
+          ["Open Prompt Shield guidance", links.promptShieldGuide]
+        ],
+        evidence: [
+          "The user sees a blocked result.",
+          "A gateway block appears in monitoring.",
+          "No prompt body is logged."
+        ],
+        query: {
+          title: "Guardrail outcomes",
+          text: queries.guardrails
+        },
+      },
+      {
+        phase: "Governance controls",
+        duration: "4 min",
+        title: "Protected Material for Code",
+        subtitle: "Model-time blocking and direct deterministic detection are separate controls.",
+        message: "The Foundry policy sets Protected Material for Code to Filter mode; the direct detector provides repeatable evidence.",
+        proves: [
+          "The applied Foundry RAI policy enables Protected Material for Code in Filter mode.",
+          "Completion blocks are handled without displaying partial code, including HTTP 200 responses.",
+          "The direct detector can return repeatable detection and citations.",
+          "The direct-check body is not logged; a clear result does not determine contractual eligibility."
+        ],
+        talk: "Generation is nondeterministic. The model guardrail can stop an indexed match. The direct form uses Microsoft’s published sample for repeatable evidence.",
+        steps: [
+          "The Foundry guardrail view shows the applied Filter-mode configuration.",
+          "The model flow demonstrates completion-time protected-code enforcement.",
+          "The direct check uses the published sample without invoking a model.",
+          "Review detection, license, source, security, and dependency evidence."
+        ],
+        links: [
+          ["Open Foundry guardrails", links.foundryGuardrails, "primary"],
+          ["Open code explainer", links.codeExplainer],
+          ["Open Microsoft sample guide", links.protectedCodeGuide],
+          ["Open protected-code API in APIM", links.apimApis]
+        ],
+        evidence: [
+          "Direct detection returns Detected.",
+          "Citation groups and source URLs are visible.",
+          "The structured outcome contains no code body."
+        ],
+        query: {
+          title: "Direct and model guardrail outcomes",
+          text: queries.guardrails
+        },
+      }
+    ];
+
+    let currentIndex = Math.max(
+      0,
+      Math.min(
+        slides.length - 1,
+        Number.parseInt(deckParams.get("slide") || "1", 10) - 1
+      )
+    );
+
+    const rail = document.getElementById("rail");
+    const slideElement = document.getElementById("slide");
+    const stage = document.getElementById("stage");
+    const progressBar = document.getElementById("progress-bar");
+    const footerStatus = document.getElementById("footer-status");
+    const previousButton = document.getElementById("previous-button");
+    const nextButton = document.getElementById("next-button");
+    const openPrimaryButton = document.getElementById("open-primary-button");
+    const toast = document.getElementById("toast");
+    const screenReaderStatus = document.getElementById("screen-reader-status");
+    const queryModal = document.getElementById("query-modal");
+    const queryDialogTitle = document.getElementById("query-dialog-title");
+    const queryDialogCode = document.getElementById("query-dialog-code");
+    const queryCopyButton = document.getElementById("query-copy-button");
+    const queryCloseButton = document.getElementById("query-close-button");
+    const diagramModal = document.getElementById("diagram-modal");
+    const diagramDialogTitle = document.getElementById("diagram-dialog-title");
+    const diagramImage = document.getElementById("diagram-image");
+    const diagramSourceLink = document.getElementById("diagram-source-link");
+    const diagramCloseButton = document.getElementById("diagram-close-button");
+    const monitoringRangeSelect = document.getElementById("monitoring-range");
+    monitoringRangeSelect.value = monitoringRangeKey;
+
+    function phaseForIndex(index) {
+      return sections.find((section) => index >= section.range[0] && index <= section.range[1]);
+    }
+
+    function resolveLink(target) {
+      return typeof target === "function" ? target() : target;
+    }
+
+    function queryResourceId(query) {
+      const usesWorkspaceTables = /\b(ApiManagementGatewayLogs|AppDependencies|AppMetrics|AppRequests|AzureDiagnostics)\b/.test(
+        query
+      );
+      return usesWorkspaceTables
+        ? deployment.resourceIds.logAnalytics
+        : deployment.resourceIds.appInsights;
+    }
+
+    function renderRail() {
+      rail.textContent = "";
+      const list = document.createElement("ol");
+      list.className = "rail-list";
+
+      slides.forEach((slide, index) => {
+        const item = document.createElement("li");
+        const button = document.createElement("button");
+        button.className = "rail-button";
+        button.type = "button";
+        button.dataset.index = String(index);
+        button.title = `${index + 1}. ${slide.title}`;
+        button.setAttribute("aria-label", `Slide ${index + 1}: ${slide.title}`);
+        button.setAttribute("aria-current", index === currentIndex ? "step" : "false");
+
+        const number = document.createElement("span");
+        number.className = "rail-number";
+        number.textContent = String(index + 1);
+
+        button.appendChild(number);
+        button.addEventListener("click", () => goTo(index));
+        item.appendChild(button);
+        list.appendChild(item);
+      });
+
+      rail.appendChild(list);
+    }
+
+    function makeList(items, className = "") {
+      const list = document.createElement("ul");
+      list.className = `clean-list ${className}`.trim();
+      items.forEach((item) => {
+        const li = document.createElement("li");
+        li.textContent = item;
+        list.appendChild(li);
+      });
+      return list;
+    }
+
+    function makeLinks(items) {
+      const container = document.createElement("div");
+      container.className = "links";
+      items.forEach(([label, url, variant]) => {
+        const resolvedUrl = resolveLink(url);
+        if (!resolvedUrl) return;
+        const link = document.createElement("a");
+        link.className = `link-button ${variant || ""}`.trim();
+        link.href = resolvedUrl;
+        link.target = "_blank";
+        link.rel = "noopener noreferrer";
+        link.textContent = label;
+        if (typeof url === "function") {
+          link.addEventListener("click", () => {
+            link.href = resolveLink(url);
+          });
+        }
+        container.appendChild(link);
+      });
+      return container;
+    }
+
+    function makeCard(title, content, extraClass = "") {
+      const card = document.createElement("section");
+      card.className = `card ${extraClass}`.trim();
+      const heading = document.createElement("h2");
+      heading.textContent = title;
+      card.appendChild(heading);
+      card.appendChild(content);
+      return card;
+    }
+
+    function makeQueryCard(query) {
+      const card = document.createElement("section");
+      card.className = "query-summary";
+      const text = document.createElement("p");
+      text.textContent =
+        `${query.title} · ${selectedMonitoringRange().label} · KQL is ready to open or copy.`;
+      const actions = document.createElement("div");
+      actions.className = "links";
+      const open = document.createElement("a");
+      open.className = "link-button primary";
+      open.href = hasDeploymentConfig
+        ? azureLogsUrl(queryResourceId(query.text), query.text)
+        : "";
+      open.target = "_blank";
+      open.rel = "noopener noreferrer";
+      open.textContent = "Open in Azure";
+      const view = document.createElement("button");
+      view.className = "button";
+      view.type = "button";
+      view.textContent = "View KQL";
+      view.addEventListener("click", () => openQueryModal(query));
+      const copy = document.createElement("button");
+      copy.className = "button";
+      copy.type = "button";
+      copy.textContent = "Copy KQL";
+      copy.addEventListener("click", () => {
+        copyText(queryForSelectedRange(query.text), "KQL copied");
+      });
+      if (hasDeploymentConfig) {
+        actions.appendChild(open);
+      }
+      actions.append(view, copy);
+      card.append(text, actions);
+      return card;
+    }
+
+    function openQueryModal(query) {
+      queryDialogTitle.textContent = `${query.title} · ${selectedMonitoringRange().label}`;
+      queryDialogCode.textContent = queryForSelectedRange(query.text);
+      queryModal.hidden = false;
+      queryCloseButton.focus();
+    }
+
+    function closeQueryModal() {
+      queryModal.hidden = true;
+      stage.focus();
+    }
+
+    function openDiagramModal(diagram) {
+      diagramDialogTitle.textContent = diagram.title;
+      const imageUrl = new URL(diagram.src, window.location.href);
+      imageUrl.searchParams.set("version", deckParams.get("version") || "local");
+      diagramImage.src = imageUrl.href;
+      diagramImage.alt = diagram.alt;
+      diagramSourceLink.href = repoFile(diagram.source);
+      diagramModal.hidden = false;
+      diagramCloseButton.focus();
+    }
+
+    function closeDiagramModal() {
+      diagramModal.hidden = true;
+      diagramImage.removeAttribute("src");
+      stage.focus();
+    }
+
+    function renderPlanes(slide) {
+      const container = document.createElement("div");
+      container.className = "two-plane";
+      slide.planes.forEach((plane) => {
+        const section = document.createElement("section");
+        section.className = "plane";
+        const title = document.createElement("h2");
+        title.className = "plane-title";
+        title.textContent = plane.title;
+        const question = document.createElement("p");
+        question.className = "plane-question";
+        question.textContent = plane.question;
+        section.append(title, question, makeList(plane.items));
+        container.appendChild(section);
+      });
+      return container;
+    }
+
+    function renderSlide() {
+      const slide = slides[currentIndex];
+      const phase = phaseForIndex(currentIndex);
+      slideElement.textContent = "";
+      const slideContent = document.createElement("div");
+      slideContent.className = "slide-content";
+      slideElement.appendChild(slideContent);
+
+      const header = document.createElement("header");
+      header.className = "slide-header";
+      const headerMain = document.createElement("div");
+      const eyebrow = document.createElement("div");
+      eyebrow.className = "eyebrow";
+      const phaseTag = document.createElement("span");
+      phaseTag.className = `tag ${phase?.name === "Governance controls" ? "accent" : ""}`.trim();
+      phaseTag.textContent = phase?.name || slide.phase;
+      const durationTag = document.createElement("span");
+      durationTag.className = "tag";
+      durationTag.textContent = slide.duration;
+      eyebrow.append(phaseTag, durationTag);
+
+      const title = document.createElement("h1");
+      title.textContent = slide.title;
+      const subtitle = document.createElement("p");
+      subtitle.className = "slide-subtitle";
+      subtitle.textContent = slide.subtitle;
+      headerMain.append(eyebrow, title, subtitle);
+
+      const count = document.createElement("div");
+      count.className = "slide-count";
+      count.textContent = `${String(currentIndex + 1).padStart(2, "0")} / ${String(slides.length).padStart(2, "0")}`;
+      const slideTools = document.createElement("div");
+      slideTools.className = "slide-tools";
+      slideTools.appendChild(count);
+      if (slide.diagram) {
+        const diagramButton = document.createElement("button");
+        diagramButton.className = "button diagram-button";
+        diagramButton.type = "button";
+        diagramButton.textContent = "View diagram";
+        diagramButton.addEventListener("click", () => openDiagramModal(slide.diagram));
+        slideTools.appendChild(diagramButton);
+      }
+      header.append(headerMain, slideTools);
+      slideContent.appendChild(header);
+
+      const message = document.createElement("section");
+      message.className = "message-card";
+      const messageLabel = document.createElement("p");
+      messageLabel.className = "message-label";
+      messageLabel.textContent = "Key message";
+      const messageText = document.createElement("p");
+      messageText.className = "message-text";
+      messageText.textContent = slide.message;
+      message.append(messageLabel, messageText);
+      slideContent.appendChild(message);
+
+      const actionBar = document.createElement("section");
+      actionBar.className = "slide-actions";
+      const actionTitle = document.createElement("h2");
+      actionTitle.textContent = hasDeploymentConfig
+        ? "Explore the live platform"
+        : "Reference material";
+      const actionLinks = makeLinks(slide.links);
+      actionBar.append(actionTitle, actionLinks);
+      if (slide.query) {
+        actionBar.appendChild(makeQueryCard(slide.query));
+      }
+
+      const grid = document.createElement("div");
+      grid.className = "slide-grid";
+      if (slide.layout === "planes") {
+        grid.classList.add("planes-grid");
+      }
+
+      const shows = slide.layout === "planes"
+        ? renderPlanes(slide)
+        : makeCard("What this shows", makeList(slide.proves));
+      shows.classList.add("grid-shows");
+
+      const talk = document.createElement("blockquote");
+      talk.className = "talk-track grid-talk";
+      talk.textContent = slide.talk;
+
+      const live = makeCard("Live platform view", makeList(slide.steps));
+      live.classList.add("grid-live");
+      const evidence = makeCard("Evidence", makeList(slide.evidence, "evidence-list"));
+      evidence.classList.add("grid-evidence");
+
+      grid.append(shows, live);
+      if (slide.layout !== "planes") {
+        grid.appendChild(evidence);
+      }
+      grid.append(talk, actionBar);
+
+      slideContent.appendChild(grid);
+      stage.scrollTop = 0;
+
+      progressBar.style.width = `${((currentIndex + 1) / slides.length) * 100}%`;
+      footerStatus.textContent = `Slide ${currentIndex + 1} of ${slides.length} · ${slide.duration} · ${slide.phase}`;
+      previousButton.disabled = currentIndex === 0;
+      nextButton.disabled = currentIndex === slides.length - 1;
+      const primaryTarget = slide.links?.[0]?.[1]
+        ? resolveLink(slide.links[0][1])
+        : "";
+      openPrimaryButton.hidden = !primaryTarget;
+      renderRail();
+
+      screenReaderStatus.textContent = `Slide ${currentIndex + 1}: ${slide.title}`;
+      document.body.dataset.currentSlide = String(currentIndex + 1);
+      window.requestAnimationFrame(() => {
+        slideContent.style.transform = "none";
+        slideContent.style.width = "100%";
+        slideContent.style.minHeight = "100%";
+        slideElement.removeAttribute("data-fits-viewport");
+        const scale = Math.max(
+          0.5,
+          Math.min(
+            0.924,
+            window.innerWidth / 1786,
+            window.innerHeight / 1004
+          )
+        );
+        slideContent.style.width = `${100 / scale}%`;
+        slideContent.style.minHeight = `${100 / scale}%`;
+        slideContent.style.transform = `scale(${scale})`;
+        slideContent.dataset.scale = String(scale);
+        window.requestAnimationFrame(() => {
+          const slideRect = slideElement.getBoundingClientRect();
+          const contentRect = slideContent.getBoundingClientRect();
+          slideElement.dataset.fitsViewport = String(
+            contentRect.bottom <= slideRect.bottom + 1 &&
+            contentRect.right <= slideRect.right + 1
+          );
+        });
+      });
+      try {
+        const currentUrl = new URL(window.location.href);
+        currentUrl.searchParams.set("slide", String(currentIndex + 1));
+        currentUrl.searchParams.set("scoutTheme", document.documentElement.dataset.theme);
+        currentUrl.searchParams.set("range", monitoringRangeKey);
+        history.replaceState(null, "", currentUrl);
+      } catch {
+        // Navigation still works when a browser restricts history changes for local files.
+      }
+    }
+
+    function goTo(index) {
+      currentIndex = Math.max(0, Math.min(slides.length - 1, index));
+      renderSlide();
+    }
+
+    function showToast(message) {
+      toast.textContent = message;
+      toast.classList.add("show");
+      window.clearTimeout(showToast.timer);
+      showToast.timer = window.setTimeout(() => toast.classList.remove("show"), 1800);
+    }
+
+    async function copyText(text, message) {
+      try {
+        await navigator.clipboard.writeText(text);
+      } catch {
+        const textarea = document.createElement("textarea");
+        textarea.value = text;
+        textarea.style.position = "fixed";
+        textarea.style.opacity = "0";
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand("copy");
+        textarea.remove();
+      }
+      showToast(message);
+    }
+
+    previousButton.addEventListener("click", () => goTo(currentIndex - 1));
+    nextButton.addEventListener("click", () => goTo(currentIndex + 1));
+
+    openPrimaryButton.addEventListener("click", () => {
+      const primary = slides[currentIndex].links?.[0]?.[1];
+      if (primary) window.open(resolveLink(primary), "_blank", "noopener,noreferrer");
+    });
+
+    monitoringRangeSelect.addEventListener("change", () => {
+      monitoringRangeKey = monitoringRangeSelect.value;
+      renderSlide();
+    });
+
+    document.getElementById("theme-button").addEventListener("click", () => {
+      const next = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+      document.documentElement.dataset.theme = next;
+      renderSlide();
+    });
+
+    document.getElementById("fullscreen-button").addEventListener("click", async () => {
+      if (document.fullscreenElement) {
+        await document.exitFullscreen();
+      } else {
+        await document.documentElement.requestFullscreen();
+      }
+    });
+
+    queryCopyButton.addEventListener("click", () => {
+      copyText(queryDialogCode.textContent, "KQL copied");
+    });
+
+    queryCloseButton.addEventListener("click", closeQueryModal);
+    queryModal.addEventListener("click", (event) => {
+      if (event.target === queryModal) closeQueryModal();
+    });
+    diagramCloseButton.addEventListener("click", closeDiagramModal);
+    diagramModal.addEventListener("click", (event) => {
+      if (event.target === diagramModal) closeDiagramModal();
+    });
+
+    document.addEventListener("keydown", (event) => {
+      const activeTag = document.activeElement?.tagName;
+      if (activeTag === "INPUT" || activeTag === "TEXTAREA") return;
+
+      if (!diagramModal.hidden || !queryModal.hidden) {
+        if (event.key === "Escape") {
+          if (!diagramModal.hidden) closeDiagramModal();
+          if (!queryModal.hidden) closeQueryModal();
+        }
+        return;
+      }
+
+      if (event.key === "ArrowRight" || event.key === "PageDown") {
+        event.preventDefault();
+        goTo(currentIndex + 1);
+      } else if (event.key === "ArrowLeft" || event.key === "PageUp") {
+        event.preventDefault();
+        goTo(currentIndex - 1);
+      } else if (event.key === "Home") {
+        event.preventDefault();
+        goTo(0);
+      } else if (event.key === "End") {
+        event.preventDefault();
+        goTo(slides.length - 1);
+      } else if (event.key.toLowerCase() === "c") {
+        if (slides[currentIndex].query) {
+          copyText(queryForSelectedRange(slides[currentIndex].query.text), "KQL copied");
+        }
+      } else if (event.key.toLowerCase() === "o") {
+        openPrimaryButton.click();
+      }
+    });
+
+    renderSlide();
+  </script>
+</body>
+</html>

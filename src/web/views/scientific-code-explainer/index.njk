@@ -1,0 +1,282 @@
+{% from "govuk/components/button/macro.njk" import govukButton %}
+{% from "govuk/components/textarea/macro.njk" import govukTextarea %}
+{% from "govuk/components/warning-text/macro.njk" import govukWarningText %}
+{% extends "layouts/main.njk" %}
+
+{% block content %}
+  <h1 class="govuk-heading-xl">Scientific Code Explainer</h1>
+  <p class="govuk-body-l">Use an organisation-managed GPT model to explain synthetic scientific code.</p>
+
+  {{ govukWarningText({
+    text: "Use synthetic or approved public code only. Do not enter proprietary source code or personal data.",
+    iconFallbackText: "Warning"
+  }) }}
+
+  <h2 class="govuk-heading-m">Sample prompts</h2>
+  <p class="govuk-body">The first samples show normal engineering work. The guardrail samples test configured Foundry controls.</p>
+  <p class="govuk-body">The code sample first tests the model guardrail. If no block occurs, the app returns the model response and sends its code to the direct Protected Material for Code API.</p>
+  <div class="govuk-button-group" aria-label="Scientific code prompt samples">
+    {% for sample in samples %}
+      <button
+        type="button"
+        class="govuk-button govuk-button--secondary sample-prompt"
+        data-module="govuk-button"
+        data-prompt="{{ sample.prompt }}"
+        data-kind="{{ sample.kind }}">
+        {{ sample.label }}
+      </button>
+    {% endfor %}
+  </div>
+
+  <div id="error-summary" hidden></div>
+
+  <form id="explainer-form" method="post" action="/scientific-code-explainer/explain">
+    {{ govukTextarea({
+      name: "prompt",
+      id: "prompt",
+      rows: 12,
+      label: {
+        text: "Scientific code or question",
+        classes: "govuk-label--m",
+        isPageHeading: false
+      },
+      hint: { text: "Select a sample or enter a synthetic code explanation task." }
+    }) }}
+    {{ govukButton({ text: "Explain code" }) }}
+  </form>
+
+  <section id="result-panel" class="govuk-!-margin-top-6" aria-live="polite" hidden>
+    <h2 class="govuk-heading-l">Result</h2>
+    <p class="govuk-body">Gateway correlation ID: <code id="correlation-id"></code></p>
+    <div id="result"></div>
+  </section>
+
+  <hr class="govuk-section-break govuk-section-break--xl govuk-section-break--visible">
+
+  <h2 class="govuk-heading-l">Check code directly</h2>
+  <p class="govuk-body">Paste generated or public test code to call Protected Material for Code without asking a model to reproduce it.</p>
+  <p class="govuk-body">
+    <a class="govuk-link" href="https://learn.microsoft.com/azure/ai-services/content-safety/quickstart-protected-material-code">
+      Open the official Microsoft sample and guide
+    </a>
+  </p>
+
+  <form id="direct-check-form" method="post" action="/scientific-code-explainer/check-protected-code">
+    {{ govukTextarea({
+      name: "code",
+      id: "direct-code",
+      rows: 12,
+      label: {
+        text: "Code to check",
+        classes: "govuk-label--m",
+        isPageHeading: false
+      },
+      hint: { text: "The default is Microsoft’s published test sample. Replace it only with code that is safe to submit." },
+      value: protectedCodeDirectSample
+    }) }}
+    {{ govukButton({ text: "Check code directly", classes: "govuk-button--secondary" }) }}
+  </form>
+
+  <section id="direct-check-panel" class="govuk-!-margin-top-6" aria-live="polite" hidden>
+    <h2 class="govuk-heading-l">Direct check result</h2>
+    <p class="govuk-body">Gateway correlation ID: <code id="direct-correlation-id"></code></p>
+    <div id="direct-check-result"></div>
+  </section>
+{% endblock %}
+
+{% block pageScripts %}
+<script nonce="{{ cspNonce }}">
+  const form = document.getElementById('explainer-form');
+  const promptInput = document.getElementById('prompt');
+  const resultPanel = document.getElementById('result-panel');
+  const resultContainer = document.getElementById('result');
+  const correlationId = document.getElementById('correlation-id');
+  const errorSummary = document.getElementById('error-summary');
+  const directForm = document.getElementById('direct-check-form');
+  const directCode = document.getElementById('direct-code');
+  const directPanel = document.getElementById('direct-check-panel');
+  const directResult = document.getElementById('direct-check-result');
+  const directCorrelationId = document.getElementById('direct-correlation-id');
+  let selectedSampleKind = 'normal';
+
+  document.querySelectorAll('.sample-prompt').forEach((button) => {
+    button.addEventListener('click', () => {
+      selectedSampleKind = button.dataset.kind || 'normal';
+      promptInput.value = button.dataset.prompt;
+      promptInput.focus();
+    });
+  });
+  promptInput.addEventListener('input', () => {
+    selectedSampleKind = 'normal';
+  });
+
+  function showError(message) {
+    errorSummary.hidden = false;
+    errorSummary.innerHTML = '<div class="govuk-error-summary" data-module="govuk-error-summary"><div role="alert"><h2 class="govuk-error-summary__title">There is a problem</h2><div class="govuk-error-summary__body"><ul class="govuk-list govuk-error-summary__list"><li><a href="#prompt"></a></li></ul></div></div></div>';
+    errorSummary.querySelector('a').textContent = message;
+  }
+
+  function showBlocked(payload) {
+    const warning = document.createElement('div');
+    warning.className = 'govuk-warning-text';
+    const icon = document.createElement('span');
+    icon.className = 'govuk-warning-text__icon';
+    icon.setAttribute('aria-hidden', 'true');
+    icon.textContent = '!';
+    const text = document.createElement('strong');
+    text.className = 'govuk-warning-text__text';
+    const assistive = document.createElement('span');
+    assistive.className = 'govuk-visually-hidden';
+    assistive.textContent = 'Warning';
+    text.appendChild(assistive);
+    text.appendChild(document.createTextNode(payload.message || 'The request was blocked by a Foundry guardrail.'));
+    warning.appendChild(icon);
+    warning.appendChild(text);
+    resultContainer.appendChild(warning);
+
+    const control = document.createElement('p');
+    control.className = 'govuk-body';
+    control.textContent = 'Control: ' + (payload.guardrail || 'content_filter');
+    resultContainer.appendChild(control);
+  }
+
+  function showResult(result) {
+    const metrics = document.createElement('p');
+    metrics.className = 'govuk-body';
+    metrics.textContent = 'Model: ' + result.model +
+      ' | Input tokens: ' + result.inputTokens +
+      ' | Output tokens: ' + result.outputTokens +
+      ' | Total tokens: ' + result.totalTokens +
+      ' | Latency: ' + result.latencyMs + ' ms' +
+      ' | Daily quota remaining: ' + (result.remainingQuotaTokens ?? 'Not returned');
+    const response = document.createElement('div');
+    response.className = 'govuk-inset-text';
+    if (result.html) {
+      response.innerHTML = result.html;
+    } else {
+      response.textContent = result.text || 'The model returned no text.';
+    }
+    resultContainer.appendChild(metrics);
+    resultContainer.appendChild(response);
+  }
+
+  function showProtectedMaterialCheck(check, container = resultContainer) {
+    if (!check) {
+      return;
+    }
+
+    const heading = document.createElement('h3');
+    heading.className = 'govuk-heading-m';
+    heading.textContent = 'Direct Protected Material for Code check';
+    container.appendChild(heading);
+
+    const status = document.createElement('p');
+    status.className = 'govuk-body';
+    if (!check.completed) {
+      status.textContent = check.error || 'The direct check could not be completed.';
+      container.appendChild(status);
+      return;
+    }
+
+    const strong = document.createElement('strong');
+    strong.textContent = check.detected ? 'Detected' : 'Not detected';
+    status.appendChild(strong);
+    status.appendChild(document.createTextNode(
+      check.detected
+        ? ' — the direct detector found an indexed code match.'
+        : ' — the direct detector did not find an indexed code match.'
+    ));
+    container.appendChild(status);
+
+    (check.citations || []).forEach((citation) => {
+      const details = document.createElement('details');
+      details.className = 'govuk-details';
+      const summary = document.createElement('summary');
+      summary.className = 'govuk-details__summary';
+      const summaryText = document.createElement('span');
+      summaryText.className = 'govuk-details__summary-text';
+      summaryText.textContent = 'Citation — license: ' + citation.license;
+      summary.appendChild(summaryText);
+      const body = document.createElement('div');
+      body.className = 'govuk-details__text';
+      const list = document.createElement('ul');
+      list.className = 'govuk-list govuk-list--bullet';
+      (citation.sourceUrls || []).forEach((url) => {
+        const item = document.createElement('li');
+        item.textContent = url;
+        list.appendChild(item);
+      });
+      body.appendChild(list);
+      details.appendChild(summary);
+      details.appendChild(body);
+      container.appendChild(details);
+    });
+  }
+
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    errorSummary.hidden = true;
+    resultPanel.hidden = false;
+    resultContainer.textContent = 'Running GPT-5.4 through the AI Gateway...';
+    correlationId.textContent = '';
+
+    const response = await fetch(form.action, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        prompt: promptInput.value,
+        sampleKind: selectedSampleKind
+      })
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      resultPanel.hidden = true;
+      showError(payload.error || payload.message || 'The code could not be explained.');
+      return;
+    }
+
+    correlationId.textContent = payload.correlationId || '';
+    resultContainer.textContent = '';
+    if (payload.blocked) {
+      showBlocked(payload);
+      return;
+    }
+    showResult(payload.result || {});
+    if (payload.protectedMaterialCheck) {
+      const modelStatus = document.createElement('p');
+      modelStatus.className = 'govuk-body';
+      const modelLabel = document.createElement('strong');
+      modelLabel.textContent = 'Model guardrail:';
+      modelStatus.appendChild(modelLabel);
+      modelStatus.appendChild(document.createTextNode(' no block returned. The model response is shown above.'));
+      resultContainer.appendChild(modelStatus);
+      showProtectedMaterialCheck(payload.protectedMaterialCheck);
+    }
+  });
+
+  directForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    directPanel.hidden = false;
+    directResult.textContent = 'Running the direct protected-code check...';
+    directCorrelationId.textContent = '';
+
+    const response = await fetch(directForm.action, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code: directCode.value })
+    });
+    const payload = await response.json().catch(() => ({}));
+    directResult.textContent = '';
+    if (!response.ok) {
+      const error = document.createElement('p');
+      error.className = 'govuk-error-message';
+      error.textContent = payload.error || payload.message || 'The direct check could not be completed.';
+      directResult.appendChild(error);
+      return;
+    }
+
+    directCorrelationId.textContent = payload.correlationId || '';
+    showProtectedMaterialCheck(payload.protectedMaterialCheck, directResult);
+  });
+</script>
+{% endblock %}

@@ -1,0 +1,38 @@
+{
+  "openapi": "3.0.1",
+  "info": {
+    "title": "Protected Material for Code",
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/check": {
+      "post": {
+        "operationId": "detectProtectedMaterialForCode",
+        "summary": "Check generated code for protected material",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "code"
+                ],
+                "properties": {
+                  "code": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Protected material analysis result"
+          }
+        }
+      }
+    }
+  }
+}

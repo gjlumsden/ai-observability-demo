@@ -1,0 +1,656 @@
+{
+  "uid": "ai-observability-finops",
+  "title": "AI Observability and Cost",
+  "description": "Single Azure Monitor dashboard for model usage, reliability, attribution, guardrails, MCP activity, billed cost, budget, export state, and resource inventory.",
+  "tags": [
+    "ai-observability",
+    "observability",
+    "finops",
+    "foundry",
+    "apim"
+  ],
+  "timezone": "browser",
+  "editable": true,
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "5m",
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "logs",
+        "label": "Azure Monitor data source",
+        "type": "datasource",
+        "query": "grafana-azure-monitor-datasource",
+        "current": {},
+        "hide": 0,
+        "refresh": 1
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Model requests",
+      "gridPos": { "h": 5, "w": 4, "x": 0, "y": 0 },
+      "datasource": { "type": "grafana-azure-monitor-datasource", "uid": "${logs}" },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "Azure Log Analytics",
+          "datasource": { "type": "grafana-azure-monitor-datasource", "uid": "${logs}" },
+          "azureLogAnalytics": {
+            "resources": ["__WORKSPACE_RESOURCE_ID__"],
+            "query": "AppRequests\n| where $__timeFilter(TimeGenerated)\n| where AppRoleName startswith \"ai-observability-demo-apim-\"\n| where Name has \"/models/\" or Name has \"/agent-model/\"\n| summarize Requests = count()",
+            "resultFormat": "table"
+          }
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Success rate",
+      "gridPos": { "h": 5, "w": 4, "x": 4, "y": 0 },
+      "datasource": { "type": "grafana-azure-monitor-datasource", "uid": "${logs}" },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "Azure Log Analytics",
+          "datasource": { "type": "grafana-azure-monitor-datasource", "uid": "${logs}" },
+          "azureLogAnalytics": {
+            "resources": ["__WORKSPACE_RESOURCE_ID__"],
+            "query": "AppRequests\n| where $__timeFilter(TimeGenerated)\n| where AppRoleName startswith \"ai-observability-demo-apim-\"\n| where Name has \"/models/\" or Name has \"/agent-model/\"\n| summarize Requests = count(), SuccessfulRequests = countif(Success == true)\n| project SuccessRate = iff(Requests == 0, real(null), round(100.0 * SuccessfulRequests / Requests, 2))",
+            "resultFormat": "table"
+          }
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "decimals": 2,
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 95 },
+              { "color": "green", "value": 99 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "P95 model latency",
+      "gridPos": { "h": 5, "w": 4, "x": 8, "y": 0 },
+      "datasource": { "type": "grafana-azure-monitor-datasource", "uid": "${logs}" },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "Azure Log Analytics",
+          "datasource": { "type": "grafana-azure-monitor-datasource", "uid": "${logs}" },
+          "azureLogAnalytics": {
+            "resources": ["__WORKSPACE_RESOURCE_ID__"],
+            "query": "AppRequests\n| where $__timeFilter(TimeGenerated)\n| where AppRoleName startswith \"ai-observability-demo-apim-\"\n| where Name has \"/models/\" or Name has \"/agent-model/\"\n| summarize P95Milliseconds = round(percentile(DurationMs, 95), 0)",
+            "resultFormat": "table"
+          }
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 5000 },
+              { "color": "red", "value": 10000 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Total tokens",
+      "gridPos": { "h": 5, "w": 4, "x": 12, "y": 0 },
+      "datasource": { "type": "grafana-azure-monitor-datasource", "uid": "${logs}" },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "Azure Log Analytics",
+          "datasource": { "type": "grafana-azure-monitor-datasource", "uid": "${logs}" },
+          "azureLogAnalytics": {
+            "resources": ["__WORKSPACE_RESOURCE_ID__"],
+            "query": "AppMetrics\n| where $__timeFilter(TimeGenerated)\n| where Name == \"Total Tokens\"\n| summarize Tokens = tolong(sum(Sum))",
+            "resultFormat": "table"
+          }
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "blue", "value": null }] }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Month-to-date billed cost (billing currency)",
+      "description": "Latest managed-identity Cost Management actual-cost snapshot.",
+      "gridPos": { "h": 5, "w": 4, "x": 16, "y": 0 },
+      "datasource": { "type": "grafana-azure-monitor-datasource", "uid": "${logs}" },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "Azure Log Analytics",
+          "datasource": { "type": "grafana-azure-monitor-datasource", "uid": "${logs}" },
+          "azureLogAnalytics": {
+            "resources": ["__WORKSPACE_RESOURCE_ID__"],
+            "query": "let LatestSnapshot = toscalar(AIObservabilityCostDaily_CL | summarize arg_max(TimeGenerated, SnapshotId) | project SnapshotId);\nAIObservabilityCostDaily_CL\n| where SnapshotId == LatestSnapshot\n| summarize ActualCost = round(sum(ActualCost), 2)",
+            "resultFormat": "table"
+          }
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 2,
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 6,
+      "type": "gauge",
+      "title": "Budget consumed",
+      "gridPos": { "h": 5, "w": 4, "x": 20, "y": 0 },
+      "datasource": { "type": "grafana-azure-monitor-datasource", "uid": "${logs}" },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "Azure Log Analytics",
+          "datasource": { "type": "grafana-azure-monitor-datasource", "uid": "${logs}" },
+          "azureLogAnalytics": {
+            "resources": ["__WORKSPACE_RESOURCE_ID__"],
+            "query": "AIObservabilityFinOpsState_CL\n| summarize arg_max(TimeGenerated, *)\n| project PercentConsumed",
+            "resultFormat": "table"
+          }
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "showThresholdLabels": false,
+        "showThresholdMarkers": true
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "decimals": 1,
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 70 },
+              { "color": "red", "value": 90 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Requests by model",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 5 },
+      "datasource": { "type": "grafana-azure-monitor-datasource", "uid": "${logs}" },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "Azure Log Analytics",
+          "datasource": { "type": "grafana-azure-monitor-datasource", "uid": "${logs}" },
+          "azureLogAnalytics": {
+            "resources": ["__WORKSPACE_RESOURCE_ID__"],
+            "query": "AppRequests\n| where $__timeFilter(TimeGenerated)\n| where AppRoleName startswith \"ai-observability-demo-apim-\"\n| where Name has \"/models/\" or Name has \"/agent-model/\"\n| extend Model = iff(Name has \"/claude/\", \"claude-opus-5\", \"gpt-5.4\")\n| summarize Requests = count() by bin(TimeGenerated, $__interval), Model\n| order by TimeGenerated asc",
+            "resultFormat": "time_series"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "short", "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 20, "showPoints": "never" } },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom", "showLegend": true, "calcs": ["sum"] },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      }
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Token trend by model and team",
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 5 },
+      "datasource": { "type": "grafana-azure-monitor-datasource", "uid": "${logs}" },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "Azure Log Analytics",
+          "datasource": { "type": "grafana-azure-monitor-datasource", "uid": "${logs}" },
+          "azureLogAnalytics": {
+            "resources": ["__WORKSPACE_RESOURCE_ID__"],
+            "query": "AppMetrics\n| where $__timeFilter(TimeGenerated)\n| where Name == \"Total Tokens\"\n| extend Model = tostring(Properties[\"Model\"]), Team = tostring(Properties[\"Team\"])\n| summarize Tokens = sum(Sum) by bin(TimeGenerated, $__interval), Model, Team\n| order by TimeGenerated asc",
+            "resultFormat": "time_series"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "short", "custom": { "drawStyle": "bars", "lineWidth": 0, "fillOpacity": 70, "stacking": { "mode": "normal", "group": "A" }, "showPoints": "never" } },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom", "showLegend": true, "calcs": ["sum"] },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      }
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "P95 latency by model",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 5 },
+      "datasource": { "type": "grafana-azure-monitor-datasource", "uid": "${logs}" },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "Azure Log Analytics",
+          "datasource": { "type": "grafana-azure-monitor-datasource", "uid": "${logs}" },
+          "azureLogAnalytics": {
+            "resources": ["__WORKSPACE_RESOURCE_ID__"],
+            "query": "AppRequests\n| where $__timeFilter(TimeGenerated)\n| where AppRoleName startswith \"ai-observability-demo-apim-\"\n| where Name has \"/models/\" or Name has \"/agent-model/\"\n| extend Model = iff(Name has \"/claude/\", \"claude-opus-5\", \"gpt-5.4\")\n| summarize P95Milliseconds = percentile(DurationMs, 95) by bin(TimeGenerated, $__interval), Model\n| order by TimeGenerated asc",
+            "resultFormat": "time_series"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "ms", "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 15, "showPoints": "never" } },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom", "showLegend": true, "calcs": ["lastNotNull", "max"] },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      }
+    },
+    {
+      "id": 20,
+      "type": "piechart",
+      "title": "Token composition",
+      "description": "Standard APIM token metrics. Prompt Cached Tokens is a subset of prompt tokens, and reasoning is a subset of completion tokens. The chart separates cached input and reasoning output without double counting.",
+      "gridPos": { "h": 9, "w": 8, "x": 0, "y": 13 },
+      "datasource": { "type": "grafana-azure-monitor-datasource", "uid": "${logs}" },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "Azure Log Analytics",
+          "datasource": { "type": "grafana-azure-monitor-datasource", "uid": "${logs}" },
+          "azureLogAnalytics": {
+            "resources": ["__WORKSPACE_RESOURCE_ID__"],
+            "query": "let Totals = AppMetrics\n| where $__timeFilter(TimeGenerated)\n| where Name in (\"Prompt Tokens\", \"Prompt Cached Tokens\", \"Completion Tokens\", \"Completion Reasoning Tokens\")\n| summarize\n    Prompt = sumif(Sum, Name == \"Prompt Tokens\"),\n    CachedInput = sumif(Sum, Name == \"Prompt Cached Tokens\"),\n    Completion = sumif(Sum, Name == \"Completion Tokens\"),\n    Reasoning = sumif(Sum, Name == \"Completion Reasoning Tokens\");\nunion\n(Totals | project TokenType = \"Uncached input\", Tokens = tolong(max_of(Prompt - CachedInput, 0.0))),\n(Totals | where CachedInput > 0 | project TokenType = \"Cached input\", Tokens = tolong(CachedInput)),\n(Totals | project TokenType = \"Visible output\", Tokens = tolong(max_of(Completion - Reasoning, 0.0))),\n(Totals | where Reasoning > 0 | project TokenType = \"Reasoning output\", Tokens = tolong(Reasoning))\n| where Tokens > 0\n| order by TokenType asc",
+            "resultFormat": "table"
+          }
+        }
+      ],
+      "options": {
+        "reduceOptions": { "values": true, "calcs": ["lastNotNull"], "fields": "" },
+        "pieType": "donut",
+        "tooltip": { "mode": "single", "sort": "none", "hideZeros": false },
+        "legend": { "displayMode": "table", "placement": "right", "showLegend": true, "values": ["value", "percent"] },
+        "displayLabels": ["name", "percent"]
+      },
+      "fieldConfig": {
+        "defaults": { "unit": "short", "decimals": 0 },
+        "overrides": []
+      }
+    },
+    {
+      "id": 10,
+      "type": "table",
+      "title": "Token attribution",
+      "gridPos": { "h": 9, "w": 16, "x": 8, "y": 13 },
+      "datasource": { "type": "grafana-azure-monitor-datasource", "uid": "${logs}" },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "Azure Log Analytics",
+          "datasource": { "type": "grafana-azure-monitor-datasource", "uid": "${logs}" },
+          "azureLogAnalytics": {
+            "resources": ["__WORKSPACE_RESOURCE_ID__"],
+            "query": "AppMetrics\n| where $__timeFilter(TimeGenerated)\n| where Name == \"Total Tokens\"\n| extend Team = tostring(Properties[\"Team\"]), User = tostring(Properties[\"User\"]), Model = tostring(Properties[\"Model\"]), Project = tostring(Properties[\"Project\"])\n| summarize Requests = tolong(sum(ItemCount)), Tokens = tolong(sum(Sum)) by Team, User, Model, Project\n| order by Tokens desc",
+            "resultFormat": "table"
+          }
+        }
+      ],
+      "options": { "showHeader": true, "cellHeight": "sm", "footer": { "show": false } },
+      "fieldConfig": { "defaults": {}, "overrides": [] }
+    },
+    {
+      "id": 11,
+      "type": "table",
+      "title": "Dependency health and request path",
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 22 },
+      "datasource": { "type": "grafana-azure-monitor-datasource", "uid": "${logs}" },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "Azure Log Analytics",
+          "datasource": { "type": "grafana-azure-monitor-datasource", "uid": "${logs}" },
+          "azureLogAnalytics": {
+            "resources": ["__WORKSPACE_RESOURCE_ID__"],
+            "query": "AppDependencies\n| where $__timeFilter(TimeGenerated)\n| where AppRoleName startswith \"ai-observability-demo-apim-\" or AppRoleName startswith \"ai-observability-demo-web-\"\n| summarize Calls = count(), Failures = countif(Success == false), P95Milliseconds = round(percentile(DurationMs, 95), 0) by AppRoleName, Name, Target\n| order by Calls desc",
+            "resultFormat": "table"
+          }
+        }
+      ],
+      "options": { "showHeader": true, "cellHeight": "sm", "footer": { "show": false } },
+      "fieldConfig": { "defaults": {}, "overrides": [] }
+    },
+    {
+      "id": 12,
+      "type": "table",
+      "title": "Guardrail outcomes",
+      "description": "Application decisions plus APIM Prompt Shield blocks and direct protected-code checks.",
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 22 },
+      "datasource": { "type": "grafana-azure-monitor-datasource", "uid": "${logs}" },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "Azure Log Analytics",
+          "datasource": { "type": "grafana-azure-monitor-datasource", "uid": "${logs}" },
+          "azureLogAnalytics": {
+            "resources": ["__WORKSPACE_RESOURCE_ID__"],
+            "query": "let ApplicationDecisions = AppEvents\n| where $__timeFilter(TimeGenerated)\n| where Name == \"guardrail.decision\"\n| extend Guardrail = tostring(Properties[\"guardrail\"]), Stage = tostring(Properties[\"stage\"]), Outcome = tostring(Properties[\"outcome\"])\n| project TimeGenerated, Source = \"Application\", Guardrail, Stage, Outcome;\nlet GatewayDecisions = ApiManagementGatewayLogs\n| where $__timeFilter(TimeGenerated)\n| where (ApiId == \"openai-model-api\" and LastErrorSource == \"llm-content-safety\" and LastErrorMessage has \"attack detected\") or ApiId == \"protected-code-api\"\n| extend Guardrail = iff(ApiId == \"protected-code-api\", \"protected_material_code\", \"prompt_shield\"), Stage = iff(ApiId == \"protected-code-api\", \"direct_check\", \"request\"), Outcome = case(ApiId == \"protected-code-api\" and ResponseCode between (200 .. 299), \"executed\", ApiId == \"openai-model-api\" and ResponseCode == 403, \"blocked\", \"failed\")\n| project TimeGenerated, Source = \"APIM\", Guardrail, Stage, Outcome;\nunion ApplicationDecisions, GatewayDecisions\n| summarize Events = count(), LastSeen = max(TimeGenerated) by Source, Guardrail, Stage, Outcome\n| order by LastSeen desc",
+            "resultFormat": "table"
+          }
+        }
+      ],
+      "options": { "showHeader": true, "cellHeight": "sm", "footer": { "show": false } },
+      "fieldConfig": { "defaults": {}, "overrides": [] }
+    },
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "Billed cost by day and service",
+      "description": "Latest Cost Management actual-cost snapshot. Billing data is delayed and can be rerated.",
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 31 },
+      "datasource": { "type": "grafana-azure-monitor-datasource", "uid": "${logs}" },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "Azure Log Analytics",
+          "datasource": { "type": "grafana-azure-monitor-datasource", "uid": "${logs}" },
+          "azureLogAnalytics": {
+            "resources": ["__WORKSPACE_RESOURCE_ID__"],
+            "query": "let LatestSnapshot = toscalar(AIObservabilityCostDaily_CL | summarize arg_max(TimeGenerated, SnapshotId) | project SnapshotId);\nAIObservabilityCostDaily_CL\n| where SnapshotId == LatestSnapshot\n| summarize ActualCost = sum(ActualCost) by UsageDate, ServiceName\n| order by UsageDate asc",
+            "resultFormat": "time_series"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "short", "decimals": 2, "custom": { "drawStyle": "bars", "lineWidth": 0, "fillOpacity": 70, "stacking": { "mode": "normal", "group": "A" }, "showPoints": "never" } },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "right", "showLegend": true, "calcs": ["sum"] },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      }
+    },
+    {
+      "id": 14,
+      "type": "barchart",
+      "title": "Month-to-date cost by service",
+      "gridPos": { "h": 9, "w": 6, "x": 12, "y": 31 },
+      "datasource": { "type": "grafana-azure-monitor-datasource", "uid": "${logs}" },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "Azure Log Analytics",
+          "datasource": { "type": "grafana-azure-monitor-datasource", "uid": "${logs}" },
+          "azureLogAnalytics": {
+            "resources": ["__WORKSPACE_RESOURCE_ID__"],
+            "query": "let LatestSnapshot = toscalar(AIObservabilityCostDaily_CL | summarize arg_max(TimeGenerated, SnapshotId) | project SnapshotId);\nAIObservabilityCostDaily_CL\n| where SnapshotId == LatestSnapshot\n| summarize ActualCost = round(sum(ActualCost), 2) by ServiceName\n| order by ActualCost desc",
+            "resultFormat": "table"
+          }
+        }
+      ],
+      "options": { "orientation": "horizontal", "showValue": "always", "legend": { "displayMode": "hidden", "showLegend": false } },
+      "fieldConfig": { "defaults": { "unit": "short", "decimals": 2 }, "overrides": [] }
+    },
+    {
+      "id": 15,
+      "type": "table",
+      "title": "Budget and export state",
+      "gridPos": { "h": 9, "w": 6, "x": 18, "y": 31 },
+      "datasource": { "type": "grafana-azure-monitor-datasource", "uid": "${logs}" },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "Azure Log Analytics",
+          "datasource": { "type": "grafana-azure-monitor-datasource", "uid": "${logs}" },
+          "azureLogAnalytics": {
+            "resources": ["__WORKSPACE_RESOURCE_ID__"],
+            "query": "AIObservabilityFinOpsState_CL\n| summarize arg_max(TimeGenerated, *)\n| project TimeGenerated, BudgetAmount, CurrentSpend, Currency, PercentConsumed = round(PercentConsumed, 2), NotificationRecipientsConfigured, ExportScheduleStatus, ExportLastRunStatus, ExportLastRunTime, ExportFormat, ExportCompression, ExportPartitioned, ExportManifestPath",
+            "resultFormat": "table"
+          }
+        }
+      ],
+      "options": { "showHeader": true, "cellHeight": "sm", "footer": { "show": false } },
+      "fieldConfig": { "defaults": {}, "overrides": [] }
+    },
+    {
+      "id": 16,
+      "type": "table",
+      "title": "APIM gateway logs",
+      "gridPos": { "h": 9, "w": 8, "x": 0, "y": 40 },
+      "datasource": { "type": "grafana-azure-monitor-datasource", "uid": "${logs}" },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "Azure Log Analytics",
+          "datasource": { "type": "grafana-azure-monitor-datasource", "uid": "${logs}" },
+          "azureLogAnalytics": {
+            "resources": ["__WORKSPACE_RESOURCE_ID__"],
+            "query": "ApiManagementGatewayLogs\n| where $__timeFilter(TimeGenerated)\n| where Url has \"/models/\" or Url has \"/agent-model/\" or Url has \"/agents/weather/\" or Url has \"/guardrails/\"\n| extend Route = tostring(parse_url(Url).Path)\n| summarize Requests = count(), Successes = countif(ResponseCode between (200 .. 399)), Failures = countif(ResponseCode >= 400), P95Milliseconds = round(percentile(TotalTime, 95), 0) by Route, ResponseCode\n| order by Requests desc",
+            "resultFormat": "table"
+          }
+        }
+      ],
+      "options": { "showHeader": true, "cellHeight": "sm", "footer": { "show": false } },
+      "fieldConfig": { "defaults": {}, "overrides": [] }
+    },
+    {
+      "id": 17,
+      "type": "table",
+      "title": "Foundry diagnostics",
+      "gridPos": { "h": 9, "w": 8, "x": 8, "y": 40 },
+      "datasource": { "type": "grafana-azure-monitor-datasource", "uid": "${logs}" },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "Azure Log Analytics",
+          "datasource": { "type": "grafana-azure-monitor-datasource", "uid": "${logs}" },
+          "azureLogAnalytics": {
+            "resources": ["__WORKSPACE_RESOURCE_ID__"],
+            "query": "AzureDiagnostics\n| where $__timeFilter(TimeGenerated)\n| where ResourceProvider == \"MICROSOFT.COGNITIVESERVICES\"\n| summarize Rows = count(), LastSeen = max(TimeGenerated) by Category\n| order by Rows desc",
+            "resultFormat": "table"
+          }
+        }
+      ],
+      "options": { "showHeader": true, "cellHeight": "sm", "footer": { "show": false } },
+      "fieldConfig": { "defaults": {}, "overrides": [] }
+    },
+    {
+      "id": 18,
+      "type": "table",
+      "title": "Resource inventory",
+      "gridPos": { "h": 9, "w": 8, "x": 16, "y": 40 },
+      "datasource": { "type": "grafana-azure-monitor-datasource", "uid": "${logs}" },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "Azure Log Analytics",
+          "datasource": { "type": "grafana-azure-monitor-datasource", "uid": "${logs}" },
+          "azureLogAnalytics": {
+            "resources": ["__WORKSPACE_RESOURCE_ID__"],
+            "query": "let LatestSnapshot = toscalar(AIObservabilityResourceInventory_CL | summarize arg_max(TimeGenerated, SnapshotId) | project SnapshotId);\nAIObservabilityResourceInventory_CL\n| where SnapshotId == LatestSnapshot\n| project ResourceName, ResourceType, Location, Tags\n| order by ResourceType asc, ResourceName asc",
+            "resultFormat": "table"
+          }
+        }
+      ],
+      "options": { "showHeader": true, "cellHeight": "sm", "footer": { "show": false } },
+      "fieldConfig": { "defaults": {}, "overrides": [] }
+    },
+    {
+      "id": 21,
+      "type": "timeseries",
+      "title": "MCP activity by method",
+      "description": "APIM GatewayMCPLogs emitted by the APIM Azure Monitor diagnostic setting.",
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 49 },
+      "datasource": { "type": "grafana-azure-monitor-datasource", "uid": "${logs}" },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "Azure Log Analytics",
+          "datasource": { "type": "grafana-azure-monitor-datasource", "uid": "${logs}" },
+          "azureLogAnalytics": {
+            "resources": ["__WORKSPACE_RESOURCE_ID__"],
+            "query": "ApiManagementGatewayMCPLog\n| where $__timeFilter(TimeGenerated)\n| where isnotempty(Method)\n| summarize Events = count() by bin(TimeGenerated, $__interval), Method\n| order by TimeGenerated asc",
+            "resultFormat": "time_series"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "short", "custom": { "drawStyle": "bars", "lineWidth": 0, "fillOpacity": 70, "stacking": { "mode": "normal", "group": "A" }, "showPoints": "never" } },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom", "showLegend": true, "calcs": ["sum"] },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      }
+    },
+    {
+      "id": 22,
+      "type": "table",
+      "title": "MCP tools and errors",
+      "description": "Tool calls and errors from APIM GatewayMCPLogs, grouped by MCP server, tool, method, and transport.",
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 49 },
+      "datasource": { "type": "grafana-azure-monitor-datasource", "uid": "${logs}" },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "Azure Log Analytics",
+          "datasource": { "type": "grafana-azure-monitor-datasource", "uid": "${logs}" },
+          "azureLogAnalytics": {
+            "resources": ["__WORKSPACE_RESOURCE_ID__"],
+            "query": "ApiManagementGatewayMCPLog\n| where $__timeFilter(TimeGenerated)\n| where Method == \"tools/call\" or isnotempty(Error) or isnotempty(ErrorType)\n| summarize Events = count(), Errors = countif(isnotempty(Error) or isnotempty(ErrorType)), LastSeen = max(TimeGenerated), Sessions = dcountif(SessionId, isnotempty(SessionId)), ProtocolVersions = make_set_if(ProtocolVersion, isnotempty(ProtocolVersion), 5) by McpServerEndpoint, ToolName, Method, TransportType\n| order by LastSeen desc",
+            "resultFormat": "table"
+          }
+        }
+      ],
+      "options": { "showHeader": true, "cellHeight": "sm", "footer": { "show": false } },
+      "fieldConfig": { "defaults": {}, "overrides": [] }
+    },
+    {
+      "id": 19,
+      "type": "table",
+      "title": "Quota responses, quality, and freshness",
+      "description": "ReviewCount shows records that need attention: quota responses, failed gateway requests, missing attribution values, or a non-completed export state. Zero means that the signal has no detected review item.",
+      "gridPos": { "h": 7, "w": 24, "x": 0, "y": 58 },
+      "datasource": { "type": "grafana-azure-monitor-datasource", "uid": "${logs}" },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "Azure Log Analytics",
+          "datasource": { "type": "grafana-azure-monitor-datasource", "uid": "${logs}" },
+          "azureLogAnalytics": {
+            "resources": ["__WORKSPACE_RESOURCE_ID__"],
+            "query": "union\n(AppRequests | summarize LastSeen = max(TimeGenerated), Records = count(), ReviewCount = countif(ResultCode == \"429\") | project Signal = \"Application requests\", LastSeen, Records, ReviewCount),\n(AppMetrics | where Name == \"Total Tokens\" | summarize LastSeen = max(TimeGenerated), Records = tolong(sum(ItemCount)), ReviewCount = countif(isempty(tostring(Properties[\"Team\"])) or isempty(tostring(Properties[\"User\"])) or isempty(tostring(Properties[\"Model\"]))) | project Signal = \"Token attribution\", LastSeen, Records, ReviewCount),\n(ApiManagementGatewayLogs | summarize LastSeen = max(TimeGenerated), Records = count(), ReviewCount = countif(ResponseCode >= 400) | project Signal = \"APIM gateway\", LastSeen, Records, ReviewCount),\n(ApiManagementGatewayMCPLog | summarize LastSeen = max(TimeGenerated), Records = count(), ReviewCount = countif(isnotempty(Error) or isnotempty(ErrorType)) | project Signal = \"APIM MCP\", LastSeen, Records, ReviewCount),\n(AIObservabilityCostDaily_CL | summarize LastSeen = max(TimeGenerated), Records = count(), ReviewCount = 0 | project Signal = \"Cost snapshot\", LastSeen, Records, ReviewCount),\n(AIObservabilityFinOpsState_CL | summarize LastSeen = max(TimeGenerated), Records = count(), ReviewCount = countif(ExportLastRunStatus != \"Completed\") | project Signal = \"Budget and export state\", LastSeen, Records, ReviewCount)\n| order by Signal asc",
+            "resultFormat": "table"
+          }
+        }
+      ],
+      "options": { "showHeader": true, "cellHeight": "sm", "footer": { "show": false } },
+      "fieldConfig": { "defaults": {}, "overrides": [] }
+    }
+  ],
+  "annotations": {
+    "list": []
+  },
+  "links": [
+    {
+      "title": "Cost Analysis",
+      "type": "link",
+      "url": "https://portal.azure.com/#view/Microsoft_Azure_CostManagement/Menu/~/costanalysis",
+      "targetBlank": true
+    }
+  ]
+}

@@ -1,0 +1,28 @@
+{% from "govuk/components/button/macro.njk" import govukButton %}
+{% from "govuk/components/summary-list/macro.njk" import govukSummaryList %}
+{% extends "layouts/main.njk" %}
+
+{% block content %}
+  <div class="govuk-grid-row">
+    <div class="govuk-grid-column-two-thirds">
+      <h1 class="govuk-heading-xl">AI Observability Demo</h1>
+      <p class="govuk-body-l">A DGS-styled demo for governed AI services through Azure API Management and Microsoft Foundry.</p>
+    </div>
+  </div>
+
+  <div class="govuk-grid-row">
+    {% for card in cards %}
+      <div class="govuk-grid-column-one-half">
+        <div class="govuk-summary-card">
+          <div class="govuk-summary-card__title-wrapper">
+            <h2 class="govuk-summary-card__title">{{ card.title }}</h2>
+          </div>
+          <div class="govuk-summary-card__content">
+            <p class="govuk-body">{{ card.description }}</p>
+            {{ govukButton({ text: "Open " + card.title, href: card.href }) }}
+          </div>
+        </div>
+      </div>
+    {% endfor %}
+  </div>
+{% endblock %}

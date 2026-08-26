@@ -1,0 +1,30 @@
+{
+  "openapi": "3.0.1",
+  "info": {
+    "title": "Weather Agent GPT-5.4 Model",
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/chat/completions": {
+      "post": {
+        "operationId": "createWeatherAgentModelCompletion",
+        "summary": "Create a GPT-5.4 chat completion for Foundry Agent Service",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Model completion"
+          }
+        }
+      }
+    }
+  }
+}

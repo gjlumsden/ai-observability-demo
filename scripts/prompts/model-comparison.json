@@ -1,0 +1,16 @@
+{
+  "small": [
+    "Explain what this Python function does and identify one edge case: def daily_rainfall_total(values_mm): return sum(value for value in values_mm if value is not None)",
+    "List three tests for a function that calculates a mean from floating-point observations.",
+    "Explain why a scientific function should state its units and missing-value behavior."
+  ],
+  "medium": [
+    "Review this Python function for numerical and data-quality risks, then propose three tests: def temperature_anomaly(values, baseline): return [(value - baseline) / baseline for value in values]",
+    "Explain a Fortran routine that sums an array and divides by its count. Identify behavior when the count is zero and suggest a safe test.",
+    "Review a scientific data transformation that converts Kelvin to Celsius. Explain unit assumptions, missing-value behavior, and numerical tolerance."
+  ],
+  "large": [
+    "Review a scientific Python module that reads hourly observations, removes missing values, converts units, calculates daily aggregates, and emits a summary. Describe likely numerical, time-zone, memory, and reproducibility risks. Propose a focused test strategy without inventing repository context.",
+    "Compare two safe implementation approaches for calculating rolling rainfall totals over a large time series. Discuss correctness, missing observations, window boundaries, numerical precision, memory use, vectorization, and tests. Do not provide third-party source code."
+  ]
+}

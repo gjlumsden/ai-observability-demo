@@ -1,0 +1,48 @@
+<policies>
+  <inbound>
+    <base />
+    <validate-azure-ad-token tenant-id="{{tenant-id}}" header-name="Authorization" failed-validation-httpcode="401" failed-validation-error-message="The access token is invalid." output-token-variable-name="validated-jwt">
+      <audiences>
+        <audience>api://{{entra-client-id}}</audience>
+        <audience>{{entra-client-id}}</audience>
+      </audiences>
+      <required-claims>
+        <claim name="scp" match="any" separator=" ">
+          <value>access_as_user</value>
+        </claim>
+      </required-claims>
+    </validate-azure-ad-token>
+    <set-variable name="attribution-user" value="@(((Jwt)context.Variables[&quot;validated-jwt&quot;]).Claims.GetValueOrDefault(&quot;oid&quot;, &quot;unknown&quot;))" />
+    <set-body>@{
+      var body = context.Request.Body.As&lt;Newtonsoft.Json.Linq.JObject&gt;(preserveContent: true);
+      body["agent_reference"] = new Newtonsoft.Json.Linq.JObject {
+        ["type"] = "agent_reference",
+        ["name"] = "weather-forecast-agent"
+      };
+      return body.ToString(Newtonsoft.Json.Formatting.None);
+    }</set-body>
+    <rate-limit-by-key calls="30" renewal-period="60" counter-key="@((string)context.Variables[&quot;attribution-user&quot;])" />
+    <set-header name="Authorization" exists-action="delete" />
+    <set-header name="api-key" exists-action="delete" />
+    <set-header name="Ocp-Apim-Subscription-Key" exists-action="delete" />
+    <set-query-parameter name="subscription-key" exists-action="delete" />
+    <set-backend-service backend-id="foundry-weather-agent" />
+    <rewrite-uri template="/openai/v1/responses" copy-unmatched-params="false" />
+    <authentication-managed-identity resource="https://ai.azure.com" />
+  </inbound>
+  <backend>
+    <base />
+  </backend>
+  <outbound>
+    <base />
+    <set-header name="x-ai-agent" exists-action="override">
+      <value>weather-forecast-agent</value>
+    </set-header>
+    <set-header name="x-attribution-team" exists-action="override">
+      <value>Presenter</value>
+    </set-header>
+  </outbound>
+  <on-error>
+    <base />
+  </on-error>
+</policies>
