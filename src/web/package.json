@@ -12,6 +12,7 @@
     "build": "node scripts/copy-govuk-assets.js",
     "test:auth-logging": "node scripts/test-auth-logging.js",
     "test:weather": "node scripts/test-weather-api.js",
+    "test:usage": "node scripts/test-usage.js",
     "postinstall": "node scripts/copy-govuk-assets.js"
   },
   "dependencies": {

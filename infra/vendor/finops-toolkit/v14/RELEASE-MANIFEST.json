@@ -1,0 +1,10 @@
+{
+  "name": "Microsoft FinOps toolkit FinOps hub",
+  "version": "v14",
+  "sourceRepository": "https://github.com/microsoft/finops-toolkit",
+  "sourceCommit": "f3b1b23f3ea6044bcd8cb767620cdd43704ce90a",
+  "releaseAsset": "finops-hub-v14.zip",
+  "releaseUrl": "https://github.com/microsoft/finops-toolkit/releases/download/v14/finops-hub-v14.zip",
+  "sha256": "cd8cae56daa324552efad711ff0f23cdb1b671e9eae215b95861029311dc8ca2",
+  "extractedDirectory": "release"
+}

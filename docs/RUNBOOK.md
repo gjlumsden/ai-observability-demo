@@ -14,15 +14,20 @@ Do not add a virtual network only for this demo. Assess private networking, Prem
 - Azure Developer CLI (`azd`).
 - PowerShell 7.
 - Node.js 24.
-- Rights to create resources, role assignments, policy assignments, budgets, and Cost Management exports.
-- Rights to register the `Microsoft.CostManagementExports` resource provider.
+- Rights to create two resource groups, resources, role assignments, policy
+  assignments, budgets, and Cost Management exports.
+- Rights to register all providers reported by the pre-provision hook.
 - Rights to create or update the Entra application.
 - Azure Marketplace permission for Foundry partner models.
 - Nonzero Hosted on Azure Version 2 quota for `claude-opus-5`.
 - GPT-5.4 quota.
 - One or more optional budget notification email addresses.
 
-The deploying identity needs the Cost Management Contributor role or equivalent rights for budgets and exports.
+The deploying identity needs **Owner** at subscription scope. An equivalent
+combination is **Contributor** plus **Role Based Access Control Administrator**.
+The preflight also requires subscription-level access to create and remove role
+assignments. The processor needs a subscription Cost Management Reader
+assignment for the excluded Claude CCU context query.
 
 ## First-time setup
 
@@ -59,18 +64,42 @@ Run the Azure Developer CLI provider preview:
 azd provision --preview --environment <environment> --no-prompt
 ```
 
-Confirm that the what-if includes:
+Run the deterministic attribution check:
+
+```powershell
+pwsh .\scripts\test-token-cost-attribution.ps1
+```
+
+This command verifies the pinned FinOps release, APIM policy contract, two
+Grafana dashboards, teardown contract, Bicep build, Python processor tests, and
+web usage normalization tests.
+
+For targeted checks, run:
+
+```powershell
+pwsh .\scripts\verify-finops-release.ps1
+pwsh .\scripts\test-apim-usage-policies.ps1
+python -m unittest discover -s .\src\usage-processor\tests
+npm.cmd run test:usage --prefix .\src\web
+```
+
+Confirm that the preview and deployment include:
 
 - APIM Basic v2.
 - App Service B1 in the selected web location.
 - GPT-5.4 and Claude Opus 5 deployments.
 - The usage workbook.
-- The resource-group budget.
-- The `cost-exports` container.
-- The daily actual-cost export.
-- The FinOps snapshot Logic App, data collection endpoint, data collection rule, and three custom Log Analytics tables.
-- The Azure Monitor dashboard with Grafana.
+- The main resource-group budget.
+- Event Hubs Standard with Capture.
+- Usage storage for Function host data, checkpoints, state, archive, and quarantine.
+- The purge-protected Key Vault and HMAC secret bootstrap.
+- The Python Flex Consumption usage processor.
+- `AIRequestUsage_CL` and `AICostAllocation_CL` with the required retention.
+- Two Azure Monitor dashboards with Grafana.
 - No unrelated resource deletion.
+
+The sibling FinOps support resource group is deployed by the post-provision
+hook. It is not present in the main resource-group Bicep preview.
 
 ## Deploy
 
@@ -85,10 +114,26 @@ The post-provision hook:
 - Generates a secure web session secret.
 - Updates the APIM Entra audience.
 - Updates web application authentication settings.
-- Starts the FinOps snapshot workflow after its role assignments propagate.
+- Deploys Microsoft FinOps hubs v14 in `<main-resource-group>-finops`.
+- Grants the hub Data Factory identity Cost Management Contributor on the main
+  resource group.
+- Enables exactly two managed FOCUS exports for the main resource group.
+- Grants the processor read access to FinOps ingestion storage.
+- Grants the processor Cost Management Reader at subscription scope.
 - Generates or preserves the weather MCP key.
 
-The pre-provision hook registers the Cost Management and Cost Management Exports resource providers.
+The FinOps deployment uses two passes. The first pass deploys the hub without
+managed exports. The hook then grants Data Factory access. The second pass
+enables one daily month-to-date and one monthly previous-month FOCUS export.
+The hook rejects exports outside the exact main resource-group scope.
+
+The support resource group has a separate monthly budget. Its default amount is
+100 in the subscription billing currency. The support group is excluded from
+the monitored FOCUS dataset.
+
+The pre-provision hook registers required providers and checks all required
+subscription permissions. It also removes resources from the legacy financial
+pipeline when they exist.
 
 The post-deploy hook checks the web health endpoint.
 It also installs the pinned Foundry Connections extension, configures the encrypted MCP connection, and upserts `weather-forecast-agent`.
@@ -280,7 +325,7 @@ Set the recorded time range. Verify:
 - Input, output, and total token values exist.
 - Both model names exist.
 - Research and Engineering exist.
-- All four synthetic users exist.
+- All four synthetic subjects exist in `AIRequestUsage_CL`.
 - Project is `platform-engineering`.
 - Attribution mode is synthetic for generated traffic.
 - The data-quality table has zero unexpected unknown values.
@@ -309,9 +354,11 @@ The Language models tab uses `ApiManagementGatewayLlmLog`. It stores model and t
 
 Prompt and completion message logging stays disabled. Confirm `RequestMessages` and `ResponseMessages` are empty.
 
-The native **Users** tab shows APIM subscription owners. The usage workbook shows the separate validated or bounded request-user dimensions.
+The native **Users** tab shows APIM subscription owners. The Workbook shows
+separate pseudonymous subject records from `AIRequestUsage_CL`.
 
-For the complete destination and privacy matrix, see [APIM telemetry configuration and destinations](observability-and-cost-management.md#apim-telemetry-configuration-and-destinations).
+For the complete destination and privacy boundary, see
+[Pseudonym and privacy boundary](observability-and-cost-management.md#pseudonym-and-privacy-boundary).
 
 Use the **APIM Analytics coverage** and **APIM LLM metadata and privacy** queries in that document for a repeatable check.
 
@@ -319,33 +366,50 @@ In `ms.portal.azure.com`, the green Language models strips can render `100%` as 
 
 Do not reduce diagnostic sampling to 1% as a display workaround.
 
-## Verify the unified Grafana dashboard
+## Verify the Grafana dashboards
 
-Open the Azure Monitor dashboard with Grafana named `AI-Observability-and-Cost`.
+Open these Azure Monitor dashboards with Grafana:
 
-Confirm that it shows:
+- `AI-Observability-and-Cost`, displayed as **AI Usage and Cost Attribution**.
+- `Attribution-Pipeline-Ops`, displayed as **Attribution Pipeline Operations**.
+
+Confirm that the attribution dashboard shows:
 
 - Model requests, success rate, P95 latency, and total tokens.
-- Prompt, visible-completion, and reasoning token composition.
-- Model and team trends.
-- Team, user, model, and project attribution.
-- Dependency health and guardrail outcomes.
-- APIM gateway and Foundry diagnostic summaries.
-- Month-to-date billed-cost snapshots.
-- Budget and export state.
-- Resource inventory and data freshness.
+- Complete provider token composition from `AIRequestUsage_CL`.
+- Model, team, and project trends.
+- Team and restricted pseudonymous subject attribution.
+- Rate-card estimates.
+- Allocated FOCUS `BilledCost` and `EffectiveCost`.
+- Unallocated resource-group cost and reconciliation.
+- Resource-group Claude CCU actual or unavailable status.
+- Subscription-wide Claude CCU external context, excluded from demo totals.
+- Data freshness and allocation exceptions.
 
-The dashboard uses the current viewer's Azure RBAC permissions. It does not use a separate Grafana identity.
+Confirm that the operations dashboard shows Event Hubs ingress, Capture state,
+processor lag, quarantine, DCR signals, FOCUS freshness, export failures, scope
+rejections, replay handling, and reconciliation residuals.
 
-If cost, budget, export, or inventory panels are empty:
+The dashboards use the current viewer's Azure RBAC permissions. Restrict the
+subject filter and individual panels to approved viewers. The subject is an HMAC
+pseudonym. A friendly alias mapping is external and is not stored by this demo.
 
-1. Open the `ai-observability-demo-finops-<suffix>` Logic App.
-2. Run the `Daily` trigger.
-3. Confirm all managed-identity HTTP actions succeeded.
-4. Allow Log Analytics ingestion time.
-5. Refresh the dashboard.
+Use the **AI Usage and Cost Investigation** Workbook for raw request and
+allocation ledgers, exceptions, evidence, latest-run reconciliation, and Claude
+external-context drill-downs.
 
-The dashboard does not replace Cost Analysis. Cost Management remains the financial source of truth.
+If cost panels are empty:
+
+1. Confirm both managed exports are active at the main resource-group scope.
+2. Check the FinOps hub Data Factory pipeline history.
+3. Check the ingestion container for a completed FOCUS dataset.
+4. Check the `AllocateFocusCost` Function execution.
+5. Allow Cost Management, Data Factory, and Log Analytics ingestion time.
+6. Refresh the dashboard.
+
+The dashboards do not replace Cost Analysis. FOCUS actuals can be delayed.
+`azd up` verifies configuration. It does not prove that billed data is
+immediately available.
 
 ## Verify Foundry monitoring
 
@@ -355,7 +419,8 @@ For the Foundry resource and each model:
 2. Use the recorded UTC window.
 3. Verify request, token, latency, error, and Content Safety activity.
 4. Record the latest data timestamp.
-5. For Claude CCU billing, compare the estimated-cost chart with Azure Cost Management.
+5. For Claude, compare the estimate, resource-group CCU status, and excluded
+   subscription context. Do not combine these values.
 
 The Foundry projects have Application Insights connections. The core scenarios call model endpoints directly.
 
@@ -374,7 +439,8 @@ Do not expect APIM, Foundry, and Cost Management values to refresh together.
 7. Confirm the agent calls only `get_weather_forecast`.
 8. Confirm the response reads as an operational assessment and does not name the tool provider.
 9. Confirm agent requests have the validated presenter user in `ApiManagementGatewayLogs`.
-10. Confirm model-token metrics use Team `Agents` and User `weather-forecast-agent`.
+10. Confirm model-token metrics use Team `Agents`. Confirm
+    `AIRequestUsage_CL` uses the fixed weather-agent subject pseudonym.
 11. Confirm MCP tool calls appear in `ApiManagementGatewayMCPLog`.
 12. Confirm **MCP activity by method** and **MCP tools and errors** contain APIM diagnostic data in Grafana.
 
@@ -394,11 +460,14 @@ At the resource-group scope:
 6. Check for the automatic Foundry `project` tag.
 7. Use the resource-and-meter view if the preview project tag is absent.
 
-For Claude, look for the CCU meter. Azure Cost Management aggregates CCU billed cost and does not provide the same per-model token view as Foundry.
+For Claude, look for the CCU meter. Azure Cost Management aggregates CCU billed
+cost and does not provide the same per-model token view as Foundry. A
+subscription charge does not prove that the row exists in the resource-group
+FOCUS export.
 
 For OpenAI, inspect the model billing meters. Input, cached input, and output tokens can use different rates.
 
-## Verify budget and export
+## Verify budgets and managed FOCUS exports
 
 Open the resource-group budget:
 
@@ -408,32 +477,36 @@ Open the resource-group budget:
 
 The budget exists without notifications when no email recipients are supplied.
 
-Open the Cost Management export:
+Open the support resource group and confirm its separate support budget. The
+default is 100 in the billing currency.
 
-- Name: `ai-observability-demo-daily-actual-cost`
-- Type: Actual cost
-- Timeframe: Month to date
-- Schedule: Daily
-- Format: Gzip-compressed CSV
-- Container: `cost-exports`
-- Folder: `daily-actual-cost`
+At the main resource-group Cost Management scope, confirm that the FinOps hub
+created exactly:
 
-Confirm the export status is active. Confirm the storage container blocks public access.
+- one daily month-to-date FOCUS export;
+- one monthly previous-month FOCUS export.
 
-The export uses a system-assigned managed identity with Storage Blob Data Contributor. Keep storage shared-key authentication disabled.
+Confirm both exports use FOCUS 1.2, Parquet, and Snappy compression. Confirm
+their destination is the sibling FinOps hub ingestion storage. Confirm no demo
+managed export exists at subscription scope.
 
-Confirm the export run history contains a completed run.
+The deployment starts both exports. Cost data can take hours or longer to
+arrive. A successful `azd up` proves the configuration and locked scope. It does
+not prove that the first FOCUS dataset contains billed data.
 
 ## Verify proactive operations
 
-This demo does not deploy an action group, Azure Monitor alert rules, or an availability test.
+This demo deploys attribution pipeline alerts and FinOps export failure
+monitoring. It does not configure a user-owned notification destination unless
+the deployment receives notification email addresses. It does not deploy an
+availability test.
 
 Before production:
 
 1. Configure alert routing.
 2. Add an availability test.
-3. Add APIM failure-rate and P95 latency alerts.
-4. Add Foundry error and throttling alerts.
+3. Add or test APIM failure-rate and P95 latency routing.
+4. Add or test Foundry error and throttling routing.
 5. Add budget recipients.
 
 See [Observability and cost management](observability-and-cost-management.md).
@@ -450,11 +523,11 @@ Complete these checks before a live walkthrough:
 6. Run **Explain rainfall aggregation** in Scientific Code Explainer.
 7. Run the Prompt Shield sample and confirm a blocked result.
 8. Confirm the workbook has recent data.
-9. Confirm the Grafana dashboard has operational data and a current FinOps snapshot.
+9. Confirm both Grafana dashboards have current usage and pipeline data.
 10. Confirm the saved traffic window.
 11. Confirm Foundry resource metrics and `RequestResponse` logs have data.
 12. Confirm Cost Analysis has model charges.
-13. Confirm the budget and export are visible.
+13. Confirm both budgets and both managed FOCUS exports are visible.
 14. Confirm `rai-ai-observability-demo` is attached to GPT-5.4.
 15. Confirm Protected Material Code and Prompt Shields use filter mode.
 16. Open all required browser tabs.
@@ -492,7 +565,9 @@ Confirm the APIM Application Insights diagnostic has custom metrics enabled. Con
 
 ### Cost is absent
 
-Confirm that the calls reached the provider. Expand the date range. Wait for Cost Management ingestion. Check the meter view before the project-tag view.
+Confirm that the calls reached the provider. Expand the date range. Wait for
+Cost Management and the managed FOCUS export. Check export and Data Factory
+freshness. Do not show missing resource-group Claude actual as zero.
 
 ### Budget alerts are absent
 
@@ -500,19 +575,26 @@ Confirm that notification email parameters were supplied. Budget evaluation foll
 
 ### Export has not written a file
 
-Confirm the schedule start time is in the future during creation. Confirm Cost Management can write to the storage account.
+Confirm that both exports are at the exact main resource-group scope. Confirm
+the Data Factory identity has Cost Management Contributor on that group. Confirm
+the FinOps ingestion storage role. Then wait for the Cost Management refresh.
 
 ### Grafana cost panels are empty
 
-Confirm the FinOps Logic App has a successful run. Check its managed-identity role assignments on the resource group and data collection rule.
+Confirm that `AIRequestUsage_CL` and `AICostAllocation_CL` contain recent scoped
+rows. Check the Function, DCR, managed export, Data Factory, and FOCUS freshness
+panels. Confirm the resource-group and model resource IDs match the deployed
+allowlist.
 
-Confirm `AIObservabilityCostDaily_CL`, `AIObservabilityFinOpsState_CL`, and `AIObservabilityResourceInventory_CL` contain a recent snapshot.
+If only Claude actual is absent, check for
+`actual-unavailable-at-resource-group-scope`. Keep the subscription-wide CCU
+panel separate.
 
 ## Teardown
 
-Plain `azd down` removes the ARM-managed Azure resources. It does not remove the
-Entra app registration because the post-provision hook creates that object outside
-the Bicep deployment.
+The `azd` pre-down and post-down hooks remove external role assignments and both
+active resource groups. They do not remove the Entra app registration because
+the post-provision hook creates it outside the Bicep deployment.
 
 Run the complete cleanup command:
 
@@ -525,16 +607,22 @@ The script:
 1. Reads `ENTRA_CLIENT_ID` before it removes the `azd` environment.
 2. Requires the exact confirmation text `delete ai observability demo`.
 3. Runs `azd down --force --purge`.
-4. Checks whether the configured resource group still exists.
-5. Deletes the resource group directly if `azd` left undiscovered resources.
-6. Purges soft-deleted Foundry and API Management services.
-7. Deletes the Entra app registration after Azure resource deletion succeeds.
-8. Removes the local `azd` environment.
-9. Returns a nonzero exit code if any cleanup stage is incomplete.
+4. Removes the Data Factory and Function external role assignments.
+5. Deletes the sibling FinOps support resource group.
+6. Checks whether the main resource group still exists.
+7. Deletes the main group directly if `azd` left resources.
+8. Purges soft-deleted Foundry and API Management services.
+9. Deletes the Entra app registration after Azure resource deletion succeeds.
+10. Removes the local `azd` environment.
+11. Returns a nonzero exit code if any cleanup stage is incomplete.
 
-The Azure deletion removes the resource group, dashboard, snapshot workflow,
-custom tables, budget, export schedule, workbook, storage data, APIM subscriptions,
-and model deployments.
+The Azure deletion removes active resources, dashboards, tables, budgets,
+managed exports, storage, APIM subscriptions, and model deployments.
+
+The Key Vault has purge protection and 90-day soft-delete retention. Teardown
+does not purge it. Azure keeps the deleted vault data recoverable and reserves
+the vault name during that period. A later `azd up` recovers the vault before
+deployment. This behavior preserves the HMAC pseudonym key across recovery.
 
 The Claude Marketplace subscription is outside the resource group. Review or
 remove that subscription separately when it is no longer required.

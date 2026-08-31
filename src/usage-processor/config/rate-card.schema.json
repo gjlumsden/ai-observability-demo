@@ -1,0 +1,118 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.example.invalid/ai-rate-card.v1.json",
+  "title": "AI list-price rate card",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "version",
+    "priceType",
+    "rates"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "1.0"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^list-price-[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+    },
+    "priceType": {
+      "const": "list-price-snapshot"
+    },
+    "rates": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/rate"
+      }
+    }
+  },
+  "$defs": {
+    "rate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "provider",
+        "model",
+        "deploymentType",
+        "tokenType",
+        "unit",
+        "listPrice",
+        "currency",
+        "validFrom",
+        "validTo",
+        "sourceUri",
+        "retrievedAt",
+        "sourceHash",
+        "version"
+      ],
+      "properties": {
+        "provider": {
+          "enum": [
+            "OpenAI",
+            "Anthropic"
+          ]
+        },
+        "model": {
+          "enum": [
+            "gpt-5.4",
+            "gpt-5.4-mini",
+            "gpt-5.4-nano",
+            "claude-opus-5"
+          ]
+        },
+        "deploymentType": {
+          "const": "GlobalStandard"
+        },
+        "tokenType": {
+          "enum": [
+            "uncached_input",
+            "cached_input",
+            "cache_read",
+            "cache_write_5m",
+            "cache_write_1h",
+            "output"
+          ]
+        },
+        "unit": {
+          "const": "USD per 1M tokens"
+        },
+        "listPrice": {
+          "type": "number",
+          "minimum": 0
+        },
+        "currency": {
+          "const": "USD"
+        },
+        "validFrom": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "validTo": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "sourceUri": {
+          "type": "string",
+          "format": "uri"
+        },
+        "retrievedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "sourceHash": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "version": {
+          "const": "list-price-2026-08-27"
+        }
+      }
+    }
+  }
+}

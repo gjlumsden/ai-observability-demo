@@ -35,6 +35,7 @@ $webAppName = Get-RequiredValue $values 'WEB_APP_NAME'
 $apimGatewayUrl = (Get-RequiredValue $values 'APIM_GATEWAY_URL').TrimEnd('/')
 $foundryEndpoint = (Get-RequiredValue $values 'FOUNDRY_ENDPOINT').TrimEnd('/')
 $weatherMcpUrl = Get-RequiredValue $values 'WEATHER_MCP_API_URL'
+$usageProcessorName = Get-RequiredValue $values 'USAGE_PROCESSOR_FUNCTION_NAME'
 $webAppUrl = "https://$webAppName.azurewebsites.net"
 $healthUrl = "$webAppUrl/healthz"
 
@@ -72,4 +73,5 @@ Write-Host "Code explainer:   $webAppUrl/scientific-code-explainer"
 Write-Host "APIM gateway:     $apimGatewayUrl"
 Write-Host "Foundry endpoint: $foundryEndpoint"
 Write-Host "Weather MCP:      $weatherMcpUrl"
+Write-Host "Usage processor:  $usageProcessorName"
 Write-Host 'Run script:       ./demo-scripts/run-demo.md'

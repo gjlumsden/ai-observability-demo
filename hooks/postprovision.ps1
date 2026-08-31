@@ -1,5 +1,7 @@
 $ErrorActionPreference = 'Stop'
 
+$repoRoot = Split-Path -Parent $PSScriptRoot
+
 function Get-AzdEnvironmentValues {
     $values = @{}
     $output = azd env get-values 2>$null
@@ -60,7 +62,7 @@ $resourceGroup = Get-RequiredValue $values 'AZURE_RESOURCE_GROUP'
 $tenantId = Get-RequiredValue $values 'AZURE_TENANT_ID'
 $webAppName = Get-RequiredValue $values 'WEB_APP_NAME'
 $apimName = Get-RequiredValue $values 'APIM_NAME'
-$finOpsWorkflowName = Get-RequiredValue $values 'FINOPS_SNAPSHOT_WORKFLOW_NAME'
+$finOpsHubName = Get-RequiredValue $values 'FINOPS_HUB_NAME'
 $weatherMcpBackendKeyNamedValueId = Get-RequiredValue $values 'WEATHER_MCP_BACKEND_KEY_NAMED_VALUE_ID'
 $webAppUrl = "https://$webAppName.azurewebsites.net"
 $redirectUri = "$webAppUrl/auth/callback"
@@ -69,6 +71,30 @@ $existingClientId = [Environment]::GetEnvironmentVariable('ENTRA_CLIENT_ID')
 if (-not $existingClientId -and $values.ContainsKey('ENTRA_CLIENT_ID')) {
     $existingClientId = $values['ENTRA_CLIENT_ID']
 }
+
+$bootstrapRoleAssignmentId = Get-RequiredValue $values 'HMAC_BOOTSTRAP_ROLE_ASSIGNMENT_ID'
+$bootstrapRoleOutput = & az role assignment delete `
+    --only-show-errors `
+    --ids $bootstrapRoleAssignmentId 2>&1
+$bootstrapRoleExitCode = $LASTEXITCODE
+if ($bootstrapRoleExitCode -ne 0 -and ($bootstrapRoleOutput -join "`n") -notmatch 'RoleAssignmentNotFound|could not be found') {
+    for ($attempt = 1; $attempt -le 5; $attempt++) {
+        Start-Sleep -Seconds 10
+        $bootstrapRoleOutput = & az role assignment delete `
+            --only-show-errors `
+            --ids $bootstrapRoleAssignmentId 2>&1
+        $bootstrapRoleExitCode = $LASTEXITCODE
+        if ($bootstrapRoleExitCode -eq 0 -or ($bootstrapRoleOutput -join "`n") -match 'RoleAssignmentNotFound|could not be found') {
+            break
+        }
+    }
+    if ($bootstrapRoleExitCode -ne 0 -and ($bootstrapRoleOutput -join "`n") -notmatch 'RoleAssignmentNotFound|could not be found') {
+        throw "Temporary HMAC bootstrap access removal failed: $($bootstrapRoleOutput -join "`n")"
+    }
+}
+
+& (Join-Path $PSScriptRoot 'deploy-finops-hub.ps1')
+$values = Get-AzdEnvironmentValues
 
 Write-Host ''
 Write-Host 'Configuring Entra sign-in' -ForegroundColor Cyan
@@ -150,7 +176,9 @@ $scopeBody = @{
     }
 } | ConvertTo-Json -Depth 10 -Compress
 
-$scopeFile = [System.IO.Path]::GetTempFileName()
+$workingDirectory = Join-Path $repoRoot '.azure'
+New-Item -ItemType Directory -Force -Path $workingDirectory | Out-Null
+$scopeFile = Join-Path $workingDirectory "postprovision-scope-$PID.json"
 try {
     Set-Content -LiteralPath $scopeFile -Value $scopeBody -Encoding utf8NoBOM -NoNewline
     Invoke-Az 'Entra delegated scope' @(
@@ -234,61 +262,6 @@ Invoke-Az 'APIM weather MCP backend key' @(
     '--output', 'none'
 )
 
-$subscriptionId = Get-RequiredValue $values 'AZURE_SUBSCRIPTION_ID'
-$workflowResourceUri = "https://management.azure.com/subscriptions/$subscriptionId/resourceGroups/$resourceGroup/providers/Microsoft.Logic/workflows/$finOpsWorkflowName"
-$snapshotTriggerUri = "$workflowResourceUri/triggers/Daily/run?api-version=2019-05-01"
-$snapshotRunsUri = "$workflowResourceUri/runs?api-version=2019-05-01"
-$snapshotSucceeded = $false
-$snapshotRunInProgress = $false
-
-for ($attempt = 1; $attempt -le 3 -and -not $snapshotSucceeded -and -not $snapshotRunInProgress; $attempt++) {
-    $requestedAfter = [DateTime]::UtcNow.AddSeconds(-5)
-    & az rest --only-show-errors --method post --uri $snapshotTriggerUri --output none 2>$null
-    if ($LASTEXITCODE -ne 0) {
-        Start-Sleep -Seconds 20
-        continue
-    }
-
-    for ($poll = 1; $poll -le 120; $poll++) {
-        Start-Sleep -Seconds 5
-        $runOutput = & az rest --only-show-errors --method get --uri $snapshotRunsUri --output json 2>$null
-        if ($LASTEXITCODE -ne 0 -or -not $runOutput) {
-            continue
-        }
-
-        $runs = ($runOutput -join "`n" | ConvertFrom-Json)
-        $run = $runs.value |
-            Where-Object { [DateTime]$_.properties.startTime -ge $requestedAfter } |
-            Sort-Object { [DateTime]$_.properties.startTime } -Descending |
-            Select-Object -First 1
-        if (-not $run) {
-            continue
-        }
-
-        $snapshotRunInProgress = $true
-        if ($run.properties.status -eq 'Succeeded') {
-            $snapshotSucceeded = $true
-            $snapshotRunInProgress = $false
-            break
-        }
-        if ($run.properties.status -in @('Failed', 'Faulted', 'Cancelled', 'Aborted', 'Skipped', 'TimedOut')) {
-            $snapshotRunInProgress = $false
-            break
-        }
-    }
-
-    if (-not $snapshotSucceeded -and -not $snapshotRunInProgress -and $attempt -lt 3) {
-        Start-Sleep -Seconds 30
-    }
-}
-
-if ($snapshotRunInProgress) {
-    Write-Warning 'The FinOps snapshot is still running. Review the Logic App run history before using the dashboard.'
-}
-elseif (-not $snapshotSucceeded) {
-    Write-Warning 'The FinOps snapshot did not complete successfully. Review the Logic App run history and run the Daily trigger again.'
-}
-
 azd env set ENTRA_CLIENT_ID $app.appId | Out-Null
 if ($LASTEXITCODE -ne 0) {
     throw 'Could not store the Entra client ID in the azd environment.'
@@ -299,4 +272,4 @@ Write-Host 'AI Observability Demo post-provision configuration completed.' -Fore
 Write-Host "Web app:      $webAppUrl"
 Write-Host "Model compare: $webAppUrl/model-comparison"
 Write-Host "Code explain:  $webAppUrl/scientific-code-explainer"
-Write-Host "FinOps snapshot: $finOpsWorkflowName ($($snapshotSucceeded ? 'Succeeded' : 'Requires review'))"
+Write-Host "FinOps hub:     $finOpsHubName (managed exports enabled)"

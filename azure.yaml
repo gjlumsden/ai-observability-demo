@@ -6,6 +6,11 @@ services:
     project: ./src/web
     language: js
     host: appservice
+  usageProcessor:
+    project: ./src/usage-processor
+    language: python
+    host: function
+    resourceName: ${USAGE_PROCESSOR_FUNCTION_NAME}
 hooks:
   preprovision:
     shell: pwsh
@@ -16,3 +21,9 @@ hooks:
   postdeploy:
     shell: pwsh
     run: ./hooks/postdeploy.ps1
+  predown:
+    shell: pwsh
+    run: ./hooks/predown.ps1
+  postdown:
+    shell: pwsh
+    run: ./hooks/postdown.ps1

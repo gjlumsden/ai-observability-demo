@@ -6,7 +6,7 @@
       "type": 1,
       "name": "title",
       "content": {
-        "json": "# AI Observability usage and cost governance\nOperational usage from APIM and Application Insights. Use Azure Cost Management as the financial source."
+        "json": "# AI Usage and Cost Investigation\nFiltered request, allocation, exception, and evidence ledgers for the **AI Usage and Cost Attribution** and **Attribution Pipeline Operations** dashboards.\n\n**Locked workload scope:** `__RESOURCE_GROUP_ID__`  \n**Allowed APIM resource:** `__APIM_RESOURCE_ID__`  \n**Allowed model resource:** `__FOUNDRY_RESOURCE_ID__`\n\nSubject IDs are pseudonymous and restricted. Subscription-wide Claude CCU context is always shown separately and excluded from workload totals."
       }
     },
     {
@@ -37,6 +37,9 @@
                 },
                 {
                   "durationMs": 604800000
+                },
+                {
+                  "durationMs": 2592000000
                 }
               ]
             },
@@ -49,25 +52,16 @@
             "type": 1,
             "isRequired": true,
             "value": "All",
-            "label": "Team"
+            "label": "Team ID"
           },
           {
-            "id": "user",
+            "id": "subject",
             "version": "KqlParameterItem/1.0",
-            "name": "User",
+            "name": "Subject",
             "type": 1,
             "isRequired": true,
             "value": "All",
-            "label": "User"
-          },
-          {
-            "id": "model",
-            "version": "KqlParameterItem/1.0",
-            "name": "Model",
-            "type": 1,
-            "isRequired": true,
-            "value": "All",
-            "label": "Model"
+            "label": "Restricted subject ID"
           },
           {
             "id": "provider",
@@ -79,124 +73,221 @@
             "label": "Provider"
           },
           {
+            "id": "model",
+            "version": "KqlParameterItem/1.0",
+            "name": "Model",
+            "type": 1,
+            "isRequired": true,
+            "value": "All",
+            "label": "Model"
+          },
+          {
             "id": "project",
             "version": "KqlParameterItem/1.0",
             "name": "Project",
             "type": 1,
             "isRequired": true,
             "value": "All",
-            "label": "Project"
+            "label": "Project ID"
+          },
+          {
+            "id": "token-quality",
+            "version": "KqlParameterItem/1.0",
+            "name": "TokenQuality",
+            "type": 1,
+            "isRequired": true,
+            "value": "All",
+            "label": "Token quality"
+          },
+          {
+            "id": "allocation-status",
+            "version": "KqlParameterItem/1.0",
+            "name": "AllocationStatus",
+            "type": 1,
+            "isRequired": true,
+            "value": "All",
+            "label": "Allocation status"
+          },
+          {
+            "id": "event-id",
+            "version": "KqlParameterItem/1.0",
+            "name": "EventId",
+            "type": 1,
+            "isRequired": true,
+            "value": "All",
+            "label": "Event ID"
+          },
+          {
+            "id": "run-id",
+            "version": "KqlParameterItem/1.0",
+            "name": "RunId",
+            "type": 1,
+            "isRequired": true,
+            "value": "All",
+            "label": "Allocation run ID"
           }
         ],
         "style": "pills",
         "queryType": 0,
-        "resourceType": "microsoft.insights/components"
+        "resourceType": "microsoft.operationalinsights/workspaces"
+      }
+    },
+    {
+      "type": 1,
+      "name": "request-ledger-heading",
+      "content": {
+        "json": "## Raw request ledger\nUse `EventId`, `CorrelationId`, and `TraceId` for drill-through. This section only includes the exact demo resource group and Foundry account."
       }
     },
     {
       "type": 3,
-      "name": "summary",
+      "name": "request-ledger",
       "content": {
         "version": "KqlItem/1.0",
-        "query": "let teamFilter = '{Team}';\nlet userFilter = '{User}';\nlet modelFilter = '{Model}';\nlet providerFilter = '{Provider}';\nlet projectFilter = '{Project}';\ncustomMetrics\n| where timestamp {TimeRange}\n| extend Team=tostring(customDimensions['Team']), User=tostring(customDimensions['User']), Model=tostring(customDimensions['Model']), Project=tostring(customDimensions['Project'])\n| extend Provider=iff(Model startswith 'claude', 'Anthropic', 'OpenAI')\n| where teamFilter == 'All' or Team == teamFilter\n| where userFilter == 'All' or User == userFilter\n| where modelFilter == 'All' or Model == modelFilter\n| where providerFilter == 'All' or Provider == providerFilter\n| where projectFilter == 'All' or Project == projectFilter\n| summarize TotalTokens=toint(sumif(valueSum, name == 'Total Tokens')), InputTokens=toint(sumif(valueSum, name == 'Prompt Tokens')), OutputTokens=toint(sumif(valueSum, name == 'Completion Tokens')), Requests=toint(sumif(valueCount, name == 'Total Tokens'))",
-        "size": 4,
-        "title": "Usage summary",
-        "queryType": 0,
-        "resourceType": "microsoft.insights/components",
-        "visualization": "table"
-      }
-    },
-    {
-      "type": 3,
-      "name": "tokens-over-time",
-      "content": {
-        "version": "KqlItem/1.0",
-        "query": "customMetrics\n| where timestamp {TimeRange}\n| where name in ('Total Tokens', 'Prompt Tokens', 'Completion Tokens')\n| extend Team=tostring(customDimensions['Team']), User=tostring(customDimensions['User']), Model=tostring(customDimensions['Model']), Project=tostring(customDimensions['Project'])\n| extend Provider=iff(Model startswith 'claude', 'Anthropic', 'OpenAI')\n| where '{Team}' == 'All' or Team == '{Team}'\n| where '{User}' == 'All' or User == '{User}'\n| where '{Model}' == 'All' or Model == '{Model}'\n| where '{Provider}' == 'All' or Provider == '{Provider}'\n| where '{Project}' == 'All' or Project == '{Project}'\n| summarize Tokens=sum(valueSum) by bin(timestamp, 15m), Model, TokenType=name\n| order by timestamp asc",
+        "query": "let teamFilter = '{Team}';\nlet subjectFilter = '{Subject}';\nlet providerFilter = '{Provider}';\nlet modelFilter = '{Model}';\nlet projectFilter = '{Project}';\nlet qualityFilter = '{TokenQuality}';\nlet eventFilter = '{EventId}';\nAIRequestUsage_CL\n| where TimeGenerated {TimeRange}\n| where ResourceGroupId =~ '__RESOURCE_GROUP_ID__'\n| where ModelResourceId =~ '__FOUNDRY_RESOURCE_ID__'\n| extend Model = iff(isempty(ResponseModel), RequestModel, ResponseModel)\n| where teamFilter == 'All' or TeamId == teamFilter\n| where subjectFilter == 'All' or SubjectId == subjectFilter\n| where providerFilter == 'All' or Provider == providerFilter\n| where modelFilter == 'All' or Model == modelFilter\n| where projectFilter == 'All' or ProjectId == projectFilter\n| where qualityFilter == 'All' or TokenQuality == qualityFilter\n| where eventFilter == 'All' or EventId == eventFilter\n| project TimeGenerated, EventId, CorrelationId, TraceId, Provider, RequestModel, ResponseModel, DeploymentName, DeploymentType, ModelResourceId, ResourceGroupId, TeamId, SubjectId, ProjectId, AttributionMode, RequestOutcome, HttpStatusCode, LatencyMs, TokenQuality, InputTokens, CachedInputTokens, UncachedInputTokens, CacheWrite5mTokens, CacheWrite1hTokens, OutputTokens, ReasoningTokens, VisibleOutputTokens, TotalTokens, RateCardVersionId, EstimatedCost, PricingCurrency, EventHubPartition, EventHubSequenceNumber, ArchivePath\n| order by TimeGenerated desc\n| take 1000",
         "size": 0,
-        "title": "Input, output, and total tokens by model",
+        "title": "Filtered request rows",
         "queryType": 0,
-        "resourceType": "microsoft.insights/components",
-        "visualization": "timechart"
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "visualization": "table",
+        "crossComponentResources": [
+          "__WORKSPACE_RESOURCE_ID__"
+        ]
+      }
+    },
+    {
+      "type": 1,
+      "name": "allocation-ledger-heading",
+      "content": {
+        "json": "## Raw allocation ledger\nThis append-only ledger keeps correction runs. Use the reconciliation section for the latest run per source path."
       }
     },
     {
       "type": 3,
-      "name": "tokens-by-team",
+      "name": "allocation-ledger",
       "content": {
         "version": "KqlItem/1.0",
-        "query": "customMetrics\n| where timestamp {TimeRange}\n| where name == 'Total Tokens'\n| extend Team=tostring(customDimensions['Team']), User=tostring(customDimensions['User']), Model=tostring(customDimensions['Model']), Project=tostring(customDimensions['Project'])\n| extend Provider=iff(Model startswith 'claude', 'Anthropic', 'OpenAI')\n| where '{Team}' == 'All' or Team == '{Team}'\n| where '{User}' == 'All' or User == '{User}'\n| where '{Model}' == 'All' or Model == '{Model}'\n| where '{Provider}' == 'All' or Provider == '{Provider}'\n| where '{Project}' == 'All' or Project == '{Project}'\n| summarize Tokens=toint(sum(valueSum)) by Team\n| order by Tokens desc",
+        "query": "let teamFilter = '{Team}';\nlet subjectFilter = '{Subject}';\nlet providerFilter = '{Provider}';\nlet statusFilter = '{AllocationStatus}';\nlet runFilter = '{RunId}';\nAICostAllocation_CL\n| where TimeGenerated {TimeRange}\n| where SourceScope =~ '__RESOURCE_GROUP_ID__'\n| where teamFilter == 'All' or TeamId == teamFilter\n| where subjectFilter == 'All' or SubjectId == subjectFilter\n| where providerFilter == 'All' or Provider == providerFilter\n| where statusFilter == 'All' or AttributionStatus == statusFilter\n| where runFilter == 'All' or RunId == runFilter\n| project TimeGenerated, RunId, AllocationVersion, SourceType, SourceScope, ChargePeriodStart, ChargePeriodEnd, BillingPeriodStart, BillingPeriodEnd, Provider, PublisherName, MeterId, MeterName, ResourceId, BillingCurrency, SourceQuantity, SourceUnit, SourceBilledCost, SourceEffectiveCost, TeamId, SubjectId, AllocationBasis, AllocationWeight, AllocationRatio, AllocatedBilledCost, AllocatedEffectiveCost, UnallocatedBilledCost, UnallocatedEffectiveCost, AttributionStatus, IncludedInWorkloadTotal, RateCardVersionId, UsageSnapshotId, SourcePath, SourceETag\n| order by TimeGenerated desc, ChargePeriodStart desc\n| take 2000",
         "size": 0,
-        "title": "Token share by team",
+        "title": "Filtered resource-group allocation rows",
         "queryType": 0,
-        "resourceType": "microsoft.insights/components",
-        "visualization": "piechart"
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "visualization": "table",
+        "crossComponentResources": [
+          "__WORKSPACE_RESOURCE_ID__"
+        ]
+      }
+    },
+    {
+      "type": 1,
+      "name": "exceptions-heading",
+      "content": {
+        "json": "## Exceptions and data quality\nReview missing rates, missing usage, unmatched meters, unknown teams, token interruptions, and unavailable actuals."
       }
     },
     {
       "type": 3,
-      "name": "tokens-by-user",
+      "name": "exceptions",
       "content": {
         "version": "KqlItem/1.0",
-        "query": "customMetrics\n| where timestamp {TimeRange}\n| where name == 'Total Tokens'\n| extend Team=tostring(customDimensions['Team']), User=tostring(customDimensions['User']), Model=tostring(customDimensions['Model']), Project=tostring(customDimensions['Project'])\n| extend Provider=iff(Model startswith 'claude', 'Anthropic', 'OpenAI')\n| where '{Team}' == 'All' or Team == '{Team}'\n| where '{User}' == 'All' or User == '{User}'\n| where '{Model}' == 'All' or Model == '{Model}'\n| where '{Provider}' == 'All' or Provider == '{Provider}'\n| where '{Project}' == 'All' or Project == '{Project}'\n| summarize Tokens=toint(sum(valueSum)) by User, Team\n| order by Tokens desc",
+        "query": "let teamFilter = '{Team}';\nlet subjectFilter = '{Subject}';\nlet providerFilter = '{Provider}';\nlet modelFilter = '{Model}';\nlet projectFilter = '{Project}';\nlet usageExceptions = AIRequestUsage_CL\n| where TimeGenerated {TimeRange}\n| where ResourceGroupId =~ '__RESOURCE_GROUP_ID__' and ModelResourceId =~ '__FOUNDRY_RESOURCE_ID__'\n| extend Model = iff(isempty(ResponseModel), RequestModel, ResponseModel)\n| where teamFilter == 'All' or TeamId == teamFilter\n| where subjectFilter == 'All' or SubjectId == subjectFilter\n| where providerFilter == 'All' or Provider == providerFilter\n| where modelFilter == 'All' or Model == modelFilter\n| where projectFilter == 'All' or ProjectId == projectFilter\n| extend Exception = case(isempty(RateCardVersionId) or RateCardVersionId == 'no-rate' or isnull(EstimatedCost), 'missing rate', isempty(TeamId) or TeamId == 'Unknown', 'unknown team', TokenQuality in ('missing', 'interrupted', 'unavailable'), strcat('token quality: ', TokenQuality), '')\n| where isnotempty(Exception)\n| project TimeGenerated, Source = 'Request', Exception, Provider, TeamId, SubjectId, EventOrRunId = EventId, TokenQuality, CostImpact = real(null), Evidence = ArchivePath;\nlet allocationExceptions = AICostAllocation_CL\n| where TimeGenerated {TimeRange}\n| where SourceScope =~ '__RESOURCE_GROUP_ID__'\n| where AttributionStatus != 'allocated' or IncludedInWorkloadTotal == false\n| where teamFilter == 'All' or TeamId == teamFilter\n| where subjectFilter == 'All' or SubjectId == subjectFilter\n| where providerFilter == 'All' or Provider == providerFilter\n| project TimeGenerated, Source = 'Allocation', Exception = AttributionStatus, Provider, TeamId, SubjectId, EventOrRunId = RunId, TokenQuality = '', CostImpact = coalesce(UnallocatedEffectiveCost, UnallocatedBilledCost), Evidence = SourcePath;\nunion usageExceptions, allocationExceptions\n| order by TimeGenerated desc\n| take 1000",
         "size": 0,
-        "title": "Token share by user",
+        "title": "Detailed exception rows",
         "queryType": 0,
-        "resourceType": "microsoft.insights/components",
-        "visualization": "barchart"
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "visualization": "table",
+        "crossComponentResources": [
+          "__WORKSPACE_RESOURCE_ID__"
+        ]
+      }
+    },
+    {
+      "type": 1,
+      "name": "evidence-heading",
+      "content": {
+        "json": "## Request evidence and drill-through\nThe raw usage field contains provider usage metadata only. The processor does not store prompts or completions."
       }
     },
     {
       "type": 3,
-      "name": "latency",
+      "name": "request-evidence",
       "content": {
         "version": "KqlItem/1.0",
-        "query": "requests\n| where timestamp {TimeRange}\n| where url has '/models/openai/' or url has '/models/claude/'\n| extend Model=iff(url has '/models/claude/', 'claude-opus-5', 'gpt-5.4')\n| extend Provider=iff(Model startswith 'claude', 'Anthropic', 'OpenAI')\n| where '{Model}' == 'All' or Model == '{Model}'\n| where '{Provider}' == 'All' or Provider == '{Provider}'\n| summarize Requests=count(), P50Milliseconds=round(percentile(duration, 50), 0), P95Milliseconds=round(percentile(duration, 95), 0) by Model\n| order by Model asc",
+        "query": "let eventFilter = '{EventId}';\nlet teamFilter = '{Team}';\nlet subjectFilter = '{Subject}';\nAIRequestUsage_CL\n| where TimeGenerated {TimeRange}\n| where ResourceGroupId =~ '__RESOURCE_GROUP_ID__' and ModelResourceId =~ '__FOUNDRY_RESOURCE_ID__'\n| where eventFilter == 'All' or EventId == eventFilter\n| where teamFilter == 'All' or TeamId == teamFilter\n| where subjectFilter == 'All' or SubjectId == subjectFilter\n| project TimeGenerated, EventId, SchemaVersion, CorrelationId, TraceId, Provider, RequestModel, ResponseModel, TeamId, SubjectId, ProjectId, RequestOutcome, HttpStatusCode, TokenQuality, RawUsage, RateCardVersionId, EstimatedCost, PricingCurrency, EventHubPartition, EventHubSequenceNumber, ArchivePath\n| order by TimeGenerated desc\n| take 500",
         "size": 0,
-        "title": "Gateway latency by model",
+        "title": "Request evidence",
         "queryType": 0,
-        "resourceType": "microsoft.insights/components",
-        "visualization": "table"
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "visualization": "table",
+        "crossComponentResources": [
+          "__WORKSPACE_RESOURCE_ID__"
+        ]
       }
     },
     {
       "type": 3,
-      "name": "quota-responses",
+      "name": "allocation-evidence",
       "content": {
         "version": "KqlItem/1.0",
-        "query": "requests\n| where timestamp {TimeRange}\n| where resultCode == '429'\n| where url has '/models/openai/' or url has '/models/claude/'\n| extend Model=iff(url has '/models/claude/', 'claude-opus-5', 'gpt-5.4')\n| summarize QuotaResponses=count() by bin(timestamp, 5m), Model, operation_Name\n| order by timestamp desc",
+        "query": "let runFilter = '{RunId}';\nAICostAllocation_CL\n| where TimeGenerated {TimeRange}\n| where SourceScope =~ '__RESOURCE_GROUP_ID__'\n| where runFilter == 'All' or RunId == runFilter\n| summarize RowCount = count(), FirstRowUtc = min(TimeGenerated), LastRowUtc = max(TimeGenerated), SourceBilledCost = take_any(SourceBilledCost), SourceEffectiveCost = take_any(SourceEffectiveCost), AllocatedBilledCost = sum(AllocatedBilledCost), AllocatedEffectiveCost = sum(AllocatedEffectiveCost), UnallocatedBilledCost = sum(UnallocatedBilledCost), UnallocatedEffectiveCost = sum(UnallocatedEffectiveCost), Statuses = make_set(AttributionStatus, 20) by RunId, AllocationVersion, SourceType, SourcePath, SourceETag, IncludedInWorkloadTotal, ChargePeriodStart, ChargePeriodEnd, Provider, MeterId, MeterName, ResourceId\n| summarize Rows = sum(RowCount), FirstRowUtc = min(FirstRowUtc), LastRowUtc = max(LastRowUtc), Providers = make_set(Provider, 20), Meters = make_set(MeterName, 50), SourceBilledCost = sum(SourceBilledCost), SourceEffectiveCost = sum(SourceEffectiveCost), AllocatedBilledCost = sum(AllocatedBilledCost), AllocatedEffectiveCost = sum(AllocatedEffectiveCost), UnallocatedBilledCost = sum(UnallocatedBilledCost), UnallocatedEffectiveCost = sum(UnallocatedEffectiveCost), Statuses = make_set(Statuses, 20) by RunId, AllocationVersion, SourceType, SourcePath, SourceETag, IncludedInWorkloadTotal\n| order by LastRowUtc desc\n| take 500",
         "size": 0,
-        "title": "Token quota responses",
+        "title": "Allocation run evidence",
         "queryType": 0,
-        "resourceType": "microsoft.insights/components",
-        "visualization": "timechart"
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "visualization": "table",
+        "crossComponentResources": [
+          "__WORKSPACE_RESOURCE_ID__"
+        ]
+      }
+    },
+    {
+      "type": 1,
+      "name": "reconciliation-heading",
+      "content": {
+        "json": "## Latest-run reconciliation\nReporting selects the newest run for each source path. Residuals retain negative adjustments and corrections."
       }
     },
     {
       "type": 3,
-      "name": "guardrail-outcomes",
+      "name": "reconciliation",
       "content": {
         "version": "KqlItem/1.0",
-        "query": "customEvents\n| where timestamp {TimeRange}\n| where name == 'guardrail.decision'\n| extend Guardrail=tostring(customDimensions['guardrail']), Stage=tostring(customDimensions['stage']), Outcome=tostring(customDimensions['outcome'])\n| summarize Events=count() by bin(timestamp, 5m), Guardrail, Stage, Outcome\n| order by timestamp desc",
+        "query": "let providerFilter = '{Provider}';\nlet scopedRows = AICostAllocation_CL\n| where SourceScope =~ '__RESOURCE_GROUP_ID__' and IncludedInWorkloadTotal == true;\nlet latestRuns = scopedRows\n| summarize arg_max(TimeGenerated, RunId) by SourcePath\n| project SourcePath, RunId;\nlatestRuns\n| join kind=inner (scopedRows) on SourcePath, RunId\n| where ChargePeriodStart {TimeRange}\n| where providerFilter == 'All' or Provider == providerFilter\n| extend SourceAuthority = coalesce(SourceEffectiveCost, SourceBilledCost), AllocatedAuthority = coalesce(AllocatedEffectiveCost, AllocatedBilledCost), UnallocatedAuthority = coalesce(UnallocatedEffectiveCost, UnallocatedBilledCost)\n| summarize SourceCost = take_any(SourceAuthority), AllocatedCost = sum(AllocatedAuthority), UnallocatedCost = sum(UnallocatedAuthority) by RunId, SourcePath, SourceETag, ChargePeriodStart, ChargePeriodEnd, Provider, MeterId, MeterName, ResourceId, BillingCurrency\n| extend Residual = SourceCost - AllocatedCost - UnallocatedCost, ReconciliationFactor = iff(SourceCost == 0, real(null), (AllocatedCost + UnallocatedCost) / SourceCost)\n| extend AbsoluteResidual = abs(Residual)\n| order by AbsoluteResidual desc, ChargePeriodStart desc\n| take 1000",
         "size": 0,
-        "title": "Guardrail outcomes",
+        "title": "Latest source-bucket reconciliation",
         "queryType": 0,
-        "resourceType": "microsoft.insights/components",
-        "visualization": "table"
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "visualization": "table",
+        "crossComponentResources": [
+          "__WORKSPACE_RESOURCE_ID__"
+        ]
+      }
+    },
+    {
+      "type": 1,
+      "name": "external-context-heading",
+      "content": {
+        "json": "## Subscription-wide Claude CCU external context\nThese rows must have `IncludedInWorkloadTotal=false`. They are not a resource-group allocation fallback or denominator."
       }
     },
     {
       "type": 3,
-      "name": "data-quality",
+      "name": "external-context",
       "content": {
         "version": "KqlItem/1.0",
-        "query": "customMetrics\n| where timestamp {TimeRange}\n| where name == 'Total Tokens'\n| extend Team=tostring(customDimensions['Team']), User=tostring(customDimensions['User']), Model=tostring(customDimensions['Model']), Project=tostring(customDimensions['Project'])\n| summarize LastMetricUtc=max(timestamp), MetricAgeMinutes=datetime_diff('minute', now(), max(timestamp)), UnknownTeam=countif(isempty(Team) or Team == 'Unknown'), UnknownUser=countif(isempty(User) or User == 'Unknown'), UnknownModel=countif(isempty(Model) or Model == 'Unknown'), UnknownProject=countif(isempty(Project) or Project == 'Unknown')",
+        "query": "let runFilter = '{RunId}';\nAICostAllocation_CL\n| where TimeGenerated {TimeRange}\n| where SourceScope == 'subscription' and SourceType == 'cost-management-query'\n| where Provider =~ 'Anthropic' and MeterName in~ ('Claude Consumption Unit', 'Claude Consumption Unit (CCU)')\n| where IncludedInWorkloadTotal == false\n| where runFilter == 'All' or RunId == runFilter\n| project TimeGenerated, ChargePeriodStart, ChargePeriodEnd, Provider, PublisherName, MeterName, BillingCurrency, SourceBilledCost, AttributionStatus, IncludedInWorkloadTotal, RunId, SourcePath, SourceETag\n| order by ChargePeriodStart desc\n| take 1000",
         "size": 0,
-        "title": "Data freshness and unknown attribution",
+        "title": "Excluded external Claude CCU rows",
         "queryType": 0,
-        "resourceType": "microsoft.insights/components",
-        "visualization": "table"
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "visualization": "table",
+        "crossComponentResources": [
+          "__WORKSPACE_RESOURCE_ID__"
+        ]
       }
     }
   ],
-  "fallbackResourceIds": []
+  "fallbackResourceIds": [
+    "__WORKSPACE_RESOURCE_ID__"
+  ]
 }

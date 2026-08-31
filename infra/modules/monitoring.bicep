@@ -12,6 +12,14 @@ param resourceSuffix string
 var cleanSuffix = toLower(replace(resourceSuffix, '-', ''))
 var lawName = 'ai-observability-demo-law-${cleanSuffix}'
 var appInsightsName = 'ai-observability-demo-appi-${cleanSuffix}'
+var foundryResourceId = resourceId(
+  'Microsoft.CognitiveServices/accounts',
+  'ai-observability-demo-foundry-${cleanSuffix}'
+)
+var apimResourceId = resourceId(
+  'Microsoft.ApiManagement/service',
+  'ai-observability-demo-apim-${resourceSuffix}'
+)
 
 resource law 'Microsoft.OperationalInsights/workspaces@2023-09-01' = {
   name: lawName
@@ -39,17 +47,35 @@ resource appInsights 'Microsoft.Insights/components@2020-02-02' = {
   }
 }
 
+var workbookWithWorkspace = replace(
+  loadTextContent('../workbooks/monitoring-workbook.json'),
+  '__WORKSPACE_RESOURCE_ID__',
+  law.id
+)
+var workbookWithResourceGroup = replace(
+  workbookWithWorkspace,
+  '__RESOURCE_GROUP_ID__',
+  resourceGroup().id
+)
+var workbookWithFoundry = replace(
+  workbookWithResourceGroup,
+  '__FOUNDRY_RESOURCE_ID__',
+  foundryResourceId
+)
+var workbookJson = replace(workbookWithFoundry, '__APIM_RESOURCE_ID__', apimResourceId)
+
 resource costGovernanceWorkbook 'Microsoft.Insights/workbooks@2023-06-01' = {
   name: guid(resourceGroup().id, 'ai-observability-cost-governance-workbook')
   location: location
   kind: 'shared'
   tags: tags
   properties: {
-    displayName: 'AI Observability usage and cost governance'
+    displayName: 'AI Usage and Cost Investigation'
+    description: 'Filtered request, allocation, exception, and evidence ledgers for the AI usage attribution dashboards.'
     category: 'workbook'
-    sourceId: appInsights.id
+    sourceId: law.id
     version: '1.0'
-    serializedData: loadTextContent('../workbooks/monitoring-workbook.json')
+    serializedData: workbookJson
   }
 }
 

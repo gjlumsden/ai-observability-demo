@@ -145,7 +145,11 @@
     metrics.className = 'govuk-body';
     metrics.textContent = 'Model: ' + result.model +
       ' | Input tokens: ' + result.inputTokens +
-      ' | Output tokens: ' + result.outputTokens +
+      ' | Uncached input: ' + result.uncachedInputTokens +
+      ' | Cached input: ' + result.cachedInputTokens +
+      ' | Visible output: ' + result.visibleOutputTokens +
+      ' | Reasoning: ' + result.reasoningTokens +
+      ' | Output total: ' + result.outputTokens +
       ' | Total tokens: ' + result.totalTokens +
       ' | Latency: ' + result.latencyMs + ' ms' +
       ' | Daily quota remaining: ' + (result.remainingQuotaTokens ?? 'Not returned');

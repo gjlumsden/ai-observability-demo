@@ -17,16 +17,17 @@ Monitor dashboard with Grafana.
 - Model, token, latency, quota, reliability, and guardrail telemetry.
 - Prompt Shields and Protected Material for Code.
 - A Foundry weather agent that calls one read-only APIM MCP tool.
-- Daily billed-cost snapshots, a budget, a cost export, and resource inventory.
-- One Grafana dashboard that joins operational and financial signals.
+- Resource-group FOCUS actuals, rate-card estimates, and pseudonymous cost allocation.
+- Two Grafana dashboards and one restricted investigation workbook.
 
 ## Architecture
 
 Microsoft Foundry hosts the model deployments and the optional prompt agent.
 API Management validates access, applies controls, routes requests, and emits
 token telemetry. The web application supplies repeatable user journeys.
-Application Insights and Log Analytics store operational signals. Cost Management
-remains the source for billed cost.
+Application Insights and Log Analytics store operational signals. A sibling FinOps
+support resource group processes managed FOCUS exports for the main demo resource
+group. Cost Management remains the source for billed cost.
 
 ![AI Observability Demo architecture](docs/diagrams/ai-observability-architecture.png)
 
@@ -34,7 +35,8 @@ Read the [architecture description](docs/architecture.md) for the component deta
 
 ## Prerequisites
 
-- An Azure subscription with rights to create the documented resources and role assignments.
+- An Azure subscription with rights to create two resource groups, the documented
+  resources, subscription-level role assignments, budgets, and managed exports.
 - Azure CLI with Bicep support.
 - Azure Developer CLI.
 - PowerShell 7.
@@ -43,6 +45,9 @@ Read the [architecture description](docs/architecture.md) for the component deta
 - Azure Marketplace permission and quota for the Hosted on Azure Version 2 `claude-opus-5` offer.
 
 ## Deploy
+
+`azd up` is the one deployment command. It creates the main demo resource group
+and configures the sibling FinOps support resource group.
 
 ```powershell
 az login
@@ -60,14 +65,22 @@ azd env set AZURE_APP_SERVICE_LOCATION <app-service-location>
 ```
 
 The deployment hooks configure the Entra application, secure session settings,
-APIM audience, weather MCP connection, and Foundry weather agent.
+APIM audience, weather MCP connection, Foundry weather agent, and FinOps hub.
+The FinOps hook uses two passes. It first deploys the hub, then grants its Data
+Factory identity access to the main resource group. The second pass enables the
+managed FOCUS exports for only that resource group.
+
+`azd up` verifies the export configuration. FOCUS billing data is delayed and can
+remain unavailable until Cost Management completes an export.
 
 Follow the [runbook](docs/RUNBOOK.md) for prerequisites, verification, troubleshooting,
 traffic generation, and teardown.
 
 ## Remove the deployment
 
-Plain `azd down` removes Azure deployment resources. It does not remove the Entra
+`azd down --force --purge` is the one active-resource removal command. Its
+lifecycle hooks remove both active resource groups and their external role
+assignments. It does not purge the purge-protected Key Vault or remove the Entra
 app registration created by the post-provision hook.
 
 Run the complete cleanup command:
@@ -77,11 +90,12 @@ pwsh ./demo-scripts/teardown.ps1
 ```
 
 The script requires confirmation. It runs `azd down --force --purge` first.
-It then deletes the configured resource group if `azd` left undiscovered resources,
-purges deleted Foundry and API Management services, deletes the app registration
-recorded in `ENTRA_CLIENT_ID`, and removes the local `azd` environment. The Claude
-Marketplace subscription remains outside the resource group and requires a
-separate review.
+It then checks both resource groups, purges deleted Foundry and API Management
+services, deletes the app registration recorded in `ENTRA_CLIENT_ID`, and removes
+the local `azd` environment. Key Vault purge protection keeps deleted vault data
+recoverable for its Azure retention period. A later `azd up` recovers the vault
+when its name is still reserved. The Claude Marketplace subscription remains
+outside the resource groups and requires a separate review.
 
 ## Present the demo
 
@@ -107,6 +121,9 @@ component, and design documents.
 - Use approved public or synthetic input.
 - Do not enter proprietary source code, personal data, credentials, or secrets.
 - APIM diagnostics exclude prompt and completion bodies.
+- APIM creates an HMAC pseudonym before usage events enter Event Hubs.
+- The usage pipeline retains no raw object ID, email address, access token,
+  subscription key, or IP address.
 - Local `azd` state and environment files are ignored by Git.
 - The deployment uses public PaaS endpoints and audit policy assignments.
 - Add workload-specific network controls, alert routing, service objectives, and evaluations before production use.
@@ -123,3 +140,4 @@ The Claude deployment follows the Microsoft-maintained
 ## License
 
 This project is licensed under the [MIT License](LICENSE).
+See [NOTICE.md](NOTICE.md) for third-party notices.

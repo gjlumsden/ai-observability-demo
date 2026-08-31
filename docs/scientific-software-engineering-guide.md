@@ -7,7 +7,7 @@ The two scenarios create clear, repeatable traffic for platform configuration an
 Keep the scenario explanation short. The main subjects are:
 
 - Approved model configuration.
-- Team and user attribution.
+- Team and pseudonymous subject attribution.
 - Token use, latency, quota, and cost.
 - Prompt Shields and Protected Material for Code.
 - Central controls with a low-friction developer experience.
@@ -59,7 +59,7 @@ In the workbook, focus on:
 
 - Requests by model.
 - Input, output, and total tokens.
-- Team and user attribution.
+- Team and pseudonymous subject attribution.
 - P50 and P95 latency.
 - Quota responses.
 - Data freshness.

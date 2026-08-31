@@ -17,6 +17,11 @@ function extractToolNames(output) {
     .filter(Boolean);
 }
 
+function tokenCount(value, fallback = 0) {
+  const count = Number(value);
+  return Number.isFinite(count) && count >= 0 ? count : fallback;
+}
+
 function normalizeWeatherAgentResponse(payload) {
   const text = extractText(payload);
   if (!text) {
@@ -25,15 +30,38 @@ function normalizeWeatherAgentResponse(payload) {
     throw error;
   }
 
+  const usage = payload.usage || {};
+  const inputTokens = tokenCount(usage.input_tokens ?? usage.prompt_tokens);
+  const cachedInputTokens = tokenCount(
+    usage.input_tokens_details?.cached_tokens ??
+    usage.prompt_tokens_details?.cached_tokens
+  );
+  const uncachedInputTokens = Math.max(inputTokens - cachedInputTokens, 0);
+  const outputTokens = tokenCount(usage.output_tokens ?? usage.completion_tokens);
+  const reasoningTokens = tokenCount(
+    usage.output_tokens_details?.reasoning_tokens ??
+    usage.completion_tokens_details?.reasoning_tokens
+  );
+  const visibleOutputTokens = Math.max(outputTokens - reasoningTokens, 0);
+  const totalTokens = tokenCount(usage.total_tokens, inputTokens + outputTokens);
+
   return {
     responseId: payload.id,
     agentName: 'weather-forecast-agent',
     text,
     tools: extractToolNames(payload.output),
-    inputTokens: Number(payload.usage?.input_tokens || 0),
-    outputTokens: Number(payload.usage?.output_tokens || 0),
-    reasoningTokens: Number(payload.usage?.output_tokens_details?.reasoning_tokens || 0),
-    totalTokens: Number(payload.usage?.total_tokens || 0)
+    inputTokens,
+    cachedInputTokens,
+    cacheReadTokens: cachedInputTokens,
+    uncachedInputTokens,
+    cacheCreationTokens: 0,
+    cacheWrite5mTokens: 0,
+    cacheWrite1hTokens: 0,
+    outputTokens,
+    reasoningTokens,
+    thinkingTokens: 0,
+    visibleOutputTokens,
+    totalTokens
   };
 }
 

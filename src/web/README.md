@@ -12,6 +12,12 @@ npm run dev
 
 Do not use proprietary source code, secrets, or personal data in the demo journeys.
 
+The web app displays provider token totals returned by APIM. It does not calculate
+billed cost. APIM emits low-cardinality metrics and a separate pseudonymous usage
+event. The web app does not send prompts, completions, raw object IDs, email
+addresses, access tokens, subscription keys, or IP addresses to the cost
+allocation pipeline.
+
 ## Environment variables
 
 - `PORT` - defaults to `3000`

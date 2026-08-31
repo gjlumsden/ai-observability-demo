@@ -19,16 +19,35 @@ param appInsightsInstrumentationKey string
 @description('Log Analytics workspace resource ID for diagnostic settings.')
 param logAnalyticsWorkspaceId string
 
+@description('Name of the Event Hubs namespace used for pseudonymous usage events.')
+param eventHubNamespaceName string
+
+@description('Name of the event hub used for pseudonymous usage events.')
+param usageEventHubName string
+
+@description('Name of the Key Vault that stores the HMAC secret.')
+param usageKeyVaultName string
+
+@description('Versionless Key Vault reference for the usage HMAC key.')
+param usageHmacKeyVaultReference string
+
 @description('Tags applied to every resource in the demo platform.')
 param tags object = {}
 
 var apimName = 'ai-observability-demo-apim-${resourceSuffix}'
 var gatewayUrl = 'https://${apimName}.azure-api.net'
-var foundryAudience = 'https://ai.azure.com'
 var foundryAgentRoot = 'https://${foundryAccountName}.services.ai.azure.com'
 var foundryProjectRoot = '${foundryAgentRoot}/api/projects/governed-model-comparison'
 var openAiModelUrl = '${foundryEndpoint}openai'
 var claudeModelUrl = '${foundryAgentRoot}/anthropic'
+var eventHubsDataSenderRoleId = subscriptionResourceId(
+  'Microsoft.Authorization/roleDefinitions',
+  '2b629674-e913-4c01-ae53-ef4638d8f975'
+)
+var keyVaultSecretsUserRoleId = subscriptionResourceId(
+  'Microsoft.Authorization/roleDefinitions',
+  '4633458b-17de-408a-b874-0445c86b69e6'
+)
 
 resource apim 'Microsoft.ApiManagement/service@2023-09-01-preview' = {
   name: apimName
@@ -93,6 +112,73 @@ resource appInsightsLogger 'Microsoft.ApiManagement/service/loggers@2023-09-01-p
   }
 }
 
+resource eventHubNamespace 'Microsoft.EventHub/namespaces@2024-01-01' existing = {
+  name: eventHubNamespaceName
+}
+
+resource usageEventHub 'Microsoft.EventHub/namespaces/eventhubs@2024-01-01' existing = {
+  parent: eventHubNamespace
+  name: usageEventHubName
+}
+
+resource usageKeyVault 'Microsoft.KeyVault/vaults@2024-11-01' existing = {
+  name: usageKeyVaultName
+}
+
+resource apimEventHubSender 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(usageEventHub.id, apim.id, eventHubsDataSenderRoleId)
+  scope: usageEventHub
+  properties: {
+    roleDefinitionId: eventHubsDataSenderRoleId
+    principalId: apim.identity.principalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
+resource apimKeyVaultSecretsUser 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(usageKeyVault.id, apim.id, keyVaultSecretsUserRoleId)
+  scope: usageKeyVault
+  properties: {
+    roleDefinitionId: keyVaultSecretsUserRoleId
+    principalId: apim.identity.principalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
+resource usageEventHubLogger 'Microsoft.ApiManagement/service/loggers@2024-05-01' = {
+  parent: apim
+  name: 'usage-event-hub'
+  properties: {
+    loggerType: 'azureEventHub'
+    description: 'Managed-identity logger for pseudonymous AI usage records.'
+    isBuffered: true
+    resourceId: usageEventHub.id
+    credentials: {
+      endpointAddress: '${eventHubNamespace.name}.servicebus.windows.net'
+      identityClientId: 'systemAssigned'
+      name: usageEventHub.name
+    }
+  }
+  dependsOn: [
+    apimEventHubSender
+  ]
+}
+
+resource usageHmacNamedValue 'Microsoft.ApiManagement/service/namedValues@2024-05-01' = {
+  parent: apim
+  name: 'usage-hmac-key'
+  properties: {
+    displayName: 'usage-hmac-key'
+    secret: true
+    keyVault: {
+      secretIdentifier: usageHmacKeyVaultReference
+    }
+  }
+  dependsOn: [
+    apimKeyVaultSecretsUser
+  ]
+}
+
 resource apimDiagnostic 'Microsoft.ApiManagement/service/diagnostics@2023-09-01-preview' = {
   parent: apim
   name: 'applicationinsights'
@@ -155,7 +241,7 @@ resource azureMonitorDiagnostic 'Microsoft.ApiManagement/service/diagnostics@202
   name: 'azuremonitor'
   properties: {
     loggerId: '${apim.id}/loggers/azuremonitor'
-    logClientIp: true
+    logClientIp: false
     sampling: {
       samplingType: 'fixed'
       percentage: 100
@@ -277,11 +363,11 @@ resource contentSafetyBackend 'Microsoft.ApiManagement/service/backends@2024-05-
       validateCertificateChain: true
       validateCertificateName: true
     }
-    credentials: {
+    credentials: any({
       managedIdentity: {
         resource: 'https://cognitiveservices.azure.com'
       }
-    }
+    })
   }
 }
 
@@ -391,6 +477,8 @@ resource openAiModelApiPolicy 'Microsoft.ApiManagement/service/apis/policies@202
     contentSafetyBackend
     tenantIdNamedValue
     entraClientIdNamedValue
+    usageEventHubLogger
+    usageHmacNamedValue
   ]
 }
 
@@ -406,6 +494,8 @@ resource claudeModelApiPolicy 'Microsoft.ApiManagement/service/apis/policies@202
     contentSafetyBackend
     tenantIdNamedValue
     entraClientIdNamedValue
+    usageEventHubLogger
+    usageHmacNamedValue
   ]
 }
 
@@ -448,6 +538,8 @@ resource weatherAgentModelApiPolicy 'Microsoft.ApiManagement/service/apis/polici
   dependsOn: [
     openAiModelBackend
     contentSafetyBackend
+    usageEventHubLogger
+    usageHmacNamedValue
   ]
 }
 
@@ -697,6 +789,9 @@ resource weatherAgentModelConnection 'Microsoft.CognitiveServices/accounts/proje
 output apimName string = apim.name
 output gatewayUrl string = gatewayUrl
 output apimPrincipalId string = apim.identity.principalId
+output usageEventHubLoggerId string = usageEventHubLogger.id
+output usageEventHubLoggerName string = usageEventHubLogger.name
+output usageHmacNamedValueId string = usageHmacNamedValue.id
 output openAiModelApiUrl string = '${gatewayUrl}/${openAiModelApi.properties.path}/responses?api-version=2025-04-01-preview'
 output claudeModelApiUrl string = '${gatewayUrl}/${claudeModelApi.properties.path}/v1/messages'
 output protectedCodeApiUrl string = '${gatewayUrl}/${protectedCodeApi.properties.path}/check'
