@@ -19,8 +19,10 @@
           </when>
         </choose>
         <set-variable name="attribution-team" value="@(context.Subscription.Id == &quot;research-team-sub&quot; ? &quot;Research&quot; : &quot;Engineering&quot;)" />
-        <set-variable name="attribution-user" value="@(context.Request.Headers.GetValueOrDefault(&quot;x-demo-user-id&quot;, &quot;unknown&quot;))" />
         <set-variable name="attribution-mode" value="synthetic" />
+        <set-variable name="subject-tenant" value="{{tenant-id}}" />
+        <set-variable name="subject-kind" value="synthetic-user" />
+        <set-variable name="subject-value" value="@(context.Request.Headers.GetValueOrDefault(&quot;x-demo-user-id&quot;, &quot;&quot;))" />
       </when>
       <otherwise>
         <validate-azure-ad-token tenant-id="{{tenant-id}}" header-name="Authorization" failed-validation-httpcode="401" failed-validation-error-message="The access token is invalid." output-token-variable-name="validated-jwt">
@@ -34,11 +36,55 @@
             </claim>
           </required-claims>
         </validate-azure-ad-token>
+        <choose>
+          <when condition="@{
+            var token = (Jwt)context.Variables[&quot;validated-jwt&quot;];
+            var tid = token.Claims.GetValueOrDefault(&quot;tid&quot;, &quot;&quot;);
+            var oid = token.Claims.GetValueOrDefault(&quot;oid&quot;, &quot;&quot;);
+            return tid.ToLowerInvariant() != &quot;{{tenant-id}}&quot;.ToLowerInvariant()
+              || !System.Text.RegularExpressions.Regex.IsMatch(oid, &quot;^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$&quot;);
+          }">
+            <return-response>
+              <set-status code="401" reason="Invalid identity claims" />
+              <set-header name="Content-Type" exists-action="override">
+                <value>application/json</value>
+              </set-header>
+              <set-body>{"error":"The access token identity claims are invalid."}</set-body>
+            </return-response>
+          </when>
+        </choose>
         <set-variable name="attribution-team" value="Presenter" />
-        <set-variable name="attribution-user" value="@(((Jwt)context.Variables[&quot;validated-jwt&quot;]).Claims.GetValueOrDefault(&quot;oid&quot;, &quot;unknown&quot;))" />
         <set-variable name="attribution-mode" value="entra" />
+        <set-variable name="subject-tenant" value="@(((Jwt)context.Variables[&quot;validated-jwt&quot;]).Claims.GetValueOrDefault(&quot;tid&quot;, &quot;&quot;))" />
+        <set-variable name="subject-kind" value="entra-user" />
+        <set-variable name="subject-value" value="@(((Jwt)context.Variables[&quot;validated-jwt&quot;]).Claims.GetValueOrDefault(&quot;oid&quot;, &quot;&quot;))" />
       </otherwise>
     </choose>
+    <set-variable name="resource-group-id" value="@{
+      var serviceId = context.Deployment.ServiceId ?? string.Empty;
+      var markerIndex = serviceId.ToLowerInvariant().IndexOf(&quot;/providers/&quot;);
+      return markerIndex &gt; 0 ? serviceId.Substring(0, markerIndex) : string.Empty;
+    }" />
+    <set-variable name="model-resource-id" value="@{
+      var resourceGroupId = (string)context.Variables[&quot;resource-group-id&quot;];
+      var host = context.Api.ServiceUrl == null ? string.Empty : context.Api.ServiceUrl.Host;
+      var dotIndex = host.IndexOf(&quot;.&quot;);
+      var accountName = dotIndex &gt; 0 ? host.Substring(0, dotIndex) : host;
+      return string.IsNullOrEmpty(resourceGroupId) || string.IsNullOrEmpty(accountName)
+        ? string.Empty
+        : resourceGroupId + &quot;/providers/Microsoft.CognitiveServices/accounts/&quot; + accountName;
+    }" />
+    <set-variable name="subject-id" value="@{
+      var material = ((string)context.Variables[&quot;subject-tenant&quot;]).ToLowerInvariant()
+        + &quot;|&quot; + (string)context.Variables[&quot;subject-kind&quot;]
+        + &quot;|&quot; + ((string)context.Variables[&quot;subject-value&quot;]).ToLowerInvariant();
+      var key = Convert.FromBase64String(&quot;{{usage-hmac-key}}&quot;);
+      var hmac = new System.Security.Cryptography.HMACSHA256(key);
+      var digest = hmac.ComputeHash(System.Text.Encoding.UTF8.GetBytes(material));
+      hmac.Dispose();
+      return Convert.ToBase64String(digest).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+    }" />
+    <set-variable name="subject-value" value="@(&quot;&quot;)" />
     <llm-token-limit
       counter-key="@(context.Subscription.Id)"
       tokens-per-minute="20000"
@@ -59,13 +105,9 @@
     </llm-content-safety>
     <llm-emit-token-metric namespace="ai-observability-gateway">
       <dimension name="API ID" />
-      <dimension name="Operation ID" />
-      <dimension name="Product ID" />
       <dimension name="Subscription ID" />
       <dimension name="Team" value="@((string)context.Variables[&quot;attribution-team&quot;])" />
-      <dimension name="User" value="@((string)context.Variables[&quot;attribution-user&quot;])" />
       <dimension name="Model" value="claude-opus-5" />
-      <dimension name="Project" value="platform-engineering" />
       <dimension name="Attribution Mode" value="@((string)context.Variables[&quot;attribution-mode&quot;])" />
     </llm-emit-token-metric>
     <set-header name="Authorization" exists-action="delete" />
@@ -87,8 +129,272 @@
     <set-header name="x-attribution-team" exists-action="override">
       <value>@((string)context.Variables["attribution-team"])</value>
     </set-header>
+    <log-to-eventhub logger-id="usage-event-hub"><![CDATA[@{
+      Newtonsoft.Json.Linq.JObject payload = null;
+      try
+      {
+        var responseText = context.Response.Body == null
+          ? string.Empty
+          : context.Response.Body.As<string>(preserveContent: true);
+        if (!string.IsNullOrWhiteSpace(responseText))
+        {
+          payload = Newtonsoft.Json.Linq.JObject.Parse(responseText);
+        }
+      }
+      catch (Exception)
+      {
+        payload = null;
+      }
+
+      var usage = payload == null ? null : payload["usage"] as Newtonsoft.Json.Linq.JObject;
+      var baseInputValue = usage == null ? null : usage["input_tokens"];
+      var cacheReadValue = usage == null ? null : usage["cache_read_input_tokens"];
+      var cacheCreationValue = usage == null ? null : usage["cache_creation_input_tokens"];
+      var outputValue = usage == null ? null : usage["output_tokens"];
+      var cacheCreationDetails = usage == null ? null : usage["cache_creation"] as Newtonsoft.Json.Linq.JObject;
+      var cacheWrite5mValue = cacheCreationDetails == null ? null : cacheCreationDetails["ephemeral_5m_input_tokens"];
+      var cacheWrite1hValue = cacheCreationDetails == null ? null : cacheCreationDetails["ephemeral_1h_input_tokens"];
+      var outputDetails = usage == null ? null : usage["output_tokens_details"] as Newtonsoft.Json.Linq.JObject;
+      var directThinkingValue = usage == null ? null : usage["thinking_tokens"];
+      var nestedThinkingValue = outputDetails == null ? null : outputDetails["thinking_tokens"];
+      var thinkingValue = directThinkingValue != null
+        && directThinkingValue.Type == Newtonsoft.Json.Linq.JTokenType.Integer
+          ? directThinkingValue
+          : nestedThinkingValue;
+
+      long? baseInputTokens = baseInputValue != null && baseInputValue.Type == Newtonsoft.Json.Linq.JTokenType.Integer
+        ? (long?)Math.Max(0L, (long)baseInputValue)
+        : null;
+      long cacheReadTokens = cacheReadValue != null && cacheReadValue.Type == Newtonsoft.Json.Linq.JTokenType.Integer
+        ? Math.Max(0L, (long)cacheReadValue)
+        : 0L;
+      long? cacheCreationTokens = cacheCreationValue != null && cacheCreationValue.Type == Newtonsoft.Json.Linq.JTokenType.Integer
+        ? (long?)Math.Max(0L, (long)cacheCreationValue)
+        : null;
+      long? cacheWrite5mTokens = cacheWrite5mValue != null && cacheWrite5mValue.Type == Newtonsoft.Json.Linq.JTokenType.Integer
+        ? (long?)Math.Max(0L, (long)cacheWrite5mValue)
+        : null;
+      long? cacheWrite1hTokens = cacheWrite1hValue != null && cacheWrite1hValue.Type == Newtonsoft.Json.Linq.JTokenType.Integer
+        ? (long?)Math.Max(0L, (long)cacheWrite1hValue)
+        : null;
+      var effectiveCacheCreationTokens = cacheCreationTokens.HasValue
+        ? cacheCreationTokens.Value
+        : (cacheWrite5mTokens ?? 0L) + (cacheWrite1hTokens ?? 0L);
+      long? inputTokens = baseInputTokens.HasValue
+        ? (long?)(baseInputTokens.Value + cacheReadTokens + effectiveCacheCreationTokens)
+        : null;
+      long? outputTokens = outputValue != null && outputValue.Type == Newtonsoft.Json.Linq.JTokenType.Integer
+        ? (long?)Math.Max(0L, (long)outputValue)
+        : null;
+      long? thinkingTokens = thinkingValue != null && thinkingValue.Type == Newtonsoft.Json.Linq.JTokenType.Integer
+        ? (long?)Math.Max(0L, (long)thinkingValue)
+        : null;
+      long? visibleOutputTokens = outputTokens.HasValue && thinkingTokens.HasValue
+        ? (long?)Math.Max(outputTokens.Value - thinkingTokens.Value, 0L)
+        : null;
+      long? totalTokens = inputTokens.HasValue && outputTokens.HasValue
+        ? (long?)(inputTokens.Value + outputTokens.Value)
+        : null;
+
+      Newtonsoft.Json.Linq.JObject rawUsage = null;
+      if (usage != null)
+      {
+        rawUsage = new Newtonsoft.Json.Linq.JObject();
+        if (baseInputValue != null && baseInputValue.Type == Newtonsoft.Json.Linq.JTokenType.Integer)
+        {
+          rawUsage["input_tokens"] = (long)baseInputValue;
+        }
+        if (cacheReadValue != null && cacheReadValue.Type == Newtonsoft.Json.Linq.JTokenType.Integer)
+        {
+          rawUsage["cache_read_input_tokens"] = (long)cacheReadValue;
+        }
+        if (cacheCreationValue != null && cacheCreationValue.Type == Newtonsoft.Json.Linq.JTokenType.Integer)
+        {
+          rawUsage["cache_creation_input_tokens"] = (long)cacheCreationValue;
+        }
+        if (outputValue != null && outputValue.Type == Newtonsoft.Json.Linq.JTokenType.Integer)
+        {
+          rawUsage["output_tokens"] = (long)outputValue;
+        }
+        if (directThinkingValue != null && directThinkingValue.Type == Newtonsoft.Json.Linq.JTokenType.Integer)
+        {
+          rawUsage["thinking_tokens"] = (long)directThinkingValue;
+        }
+        var rawCacheCreation = new Newtonsoft.Json.Linq.JObject();
+        if (cacheWrite5mValue != null && cacheWrite5mValue.Type == Newtonsoft.Json.Linq.JTokenType.Integer)
+        {
+          rawCacheCreation["ephemeral_5m_input_tokens"] = (long)cacheWrite5mValue;
+        }
+        if (cacheWrite1hValue != null && cacheWrite1hValue.Type == Newtonsoft.Json.Linq.JTokenType.Integer)
+        {
+          rawCacheCreation["ephemeral_1h_input_tokens"] = (long)cacheWrite1hValue;
+        }
+        if (rawCacheCreation.Count > 0)
+        {
+          rawUsage["cache_creation"] = rawCacheCreation;
+        }
+        var rawOutputDetails = new Newtonsoft.Json.Linq.JObject();
+        if (nestedThinkingValue != null && nestedThinkingValue.Type == Newtonsoft.Json.Linq.JTokenType.Integer)
+        {
+          rawOutputDetails["thinking_tokens"] = (long)nestedThinkingValue;
+        }
+        if (rawOutputDetails.Count > 0)
+        {
+          rawUsage["output_tokens_details"] = rawOutputDetails;
+        }
+        if (rawUsage.Count == 0)
+        {
+          rawUsage = null;
+        }
+      }
+
+      var responseId = payload != null && payload["id"] != null
+        && payload["id"].Type == Newtonsoft.Json.Linq.JTokenType.String
+        ? (string)payload["id"]
+        : string.Empty;
+      if (responseId.Length > 256)
+      {
+        responseId = responseId.Substring(0, 256);
+      }
+      var responseModel = payload != null && payload["model"] != null
+        && payload["model"].Type == Newtonsoft.Json.Linq.JTokenType.String
+        ? (string)payload["model"]
+        : string.Empty;
+      if (!System.Text.RegularExpressions.Regex.IsMatch(responseModel, "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"))
+      {
+        responseModel = string.Empty;
+      }
+
+      var traceParent = context.Request.Headers.GetValueOrDefault("traceparent", string.Empty);
+      var traceMatch = System.Text.RegularExpressions.Regex.Match(
+        traceParent,
+        "^[0-9A-Fa-f]{2}-([0-9A-Fa-f]{32})-[0-9A-Fa-f]{16}-[0-9A-Fa-f]{2}$");
+      var traceId = traceMatch.Success ? traceMatch.Groups[1].Value.ToLowerInvariant() : string.Empty;
+      var eventKey = context.RequestId.ToString("D") + "|Anthropic|" + responseId + "|" + responseModel;
+      var sha = System.Security.Cryptography.SHA256.Create();
+      var eventDigest = sha.ComputeHash(System.Text.Encoding.UTF8.GetBytes(eventKey));
+      sha.Dispose();
+      var eventId = Convert.ToBase64String(eventDigest).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+      var statusCode = context.Response.StatusCode;
+      var requestOutcome = statusCode >= 200 && statusCode <= 299
+        ? (payload == null ? "unavailable" : "succeeded")
+        : "failed";
+      var tokenQuality = rawUsage == null
+        ? "missing"
+        : baseInputTokens.HasValue && outputTokens.HasValue
+          ? "exact"
+          : "partial";
+
+      var usageEvent = new Newtonsoft.Json.Linq.JObject();
+      usageEvent["schemaVersion"] = "1.0";
+      usageEvent["eventTimeUtc"] = DateTime.UtcNow.ToString("o");
+      usageEvent["eventId"] = eventId;
+      usageEvent["correlationId"] = context.RequestId.ToString("D");
+      usageEvent["traceId"] = string.IsNullOrEmpty(traceId)
+        ? (Newtonsoft.Json.Linq.JToken)Newtonsoft.Json.Linq.JValue.CreateNull()
+        : new Newtonsoft.Json.Linq.JValue(traceId);
+      usageEvent["provider"] = "Anthropic";
+      usageEvent["requestModel"] = "claude-opus-5";
+      usageEvent["responseModel"] = string.IsNullOrEmpty(responseModel)
+        ? (Newtonsoft.Json.Linq.JToken)Newtonsoft.Json.Linq.JValue.CreateNull()
+        : new Newtonsoft.Json.Linq.JValue(responseModel);
+      usageEvent["deploymentName"] = "claude-opus-5";
+      usageEvent["deploymentType"] = "GlobalStandard";
+      usageEvent["modelResourceId"] = (string)context.Variables["model-resource-id"];
+      usageEvent["resourceGroupId"] = (string)context.Variables["resource-group-id"];
+      usageEvent["teamId"] = (string)context.Variables["attribution-team"];
+      usageEvent["subjectId"] = (string)context.Variables["subject-id"];
+      usageEvent["projectId"] = "platform-engineering";
+      usageEvent["attributionMode"] = (string)context.Variables["attribution-mode"];
+      usageEvent["requestOutcome"] = requestOutcome;
+      usageEvent["httpStatusCode"] = statusCode;
+      usageEvent["latencyMs"] = Math.Max(0L, (long)context.Elapsed.TotalMilliseconds);
+      usageEvent["tokenQuality"] = tokenQuality;
+      usageEvent["inputTokens"] = inputTokens.HasValue
+        ? new Newtonsoft.Json.Linq.JValue(inputTokens.Value)
+        : Newtonsoft.Json.Linq.JValue.CreateNull();
+      usageEvent["cachedInputTokens"] = rawUsage == null
+        ? Newtonsoft.Json.Linq.JValue.CreateNull()
+        : new Newtonsoft.Json.Linq.JValue(cacheReadTokens);
+      usageEvent["uncachedInputTokens"] = baseInputTokens.HasValue
+        ? new Newtonsoft.Json.Linq.JValue(baseInputTokens.Value)
+        : Newtonsoft.Json.Linq.JValue.CreateNull();
+      usageEvent["cacheWrite5mTokens"] = cacheWrite5mTokens.HasValue
+        ? new Newtonsoft.Json.Linq.JValue(cacheWrite5mTokens.Value)
+        : Newtonsoft.Json.Linq.JValue.CreateNull();
+      usageEvent["cacheWrite1hTokens"] = cacheWrite1hTokens.HasValue
+        ? new Newtonsoft.Json.Linq.JValue(cacheWrite1hTokens.Value)
+        : Newtonsoft.Json.Linq.JValue.CreateNull();
+      usageEvent["outputTokens"] = outputTokens.HasValue
+        ? new Newtonsoft.Json.Linq.JValue(outputTokens.Value)
+        : Newtonsoft.Json.Linq.JValue.CreateNull();
+      usageEvent["reasoningTokens"] = thinkingTokens.HasValue
+        ? new Newtonsoft.Json.Linq.JValue(thinkingTokens.Value)
+        : Newtonsoft.Json.Linq.JValue.CreateNull();
+      usageEvent["visibleOutputTokens"] = visibleOutputTokens.HasValue
+        ? new Newtonsoft.Json.Linq.JValue(visibleOutputTokens.Value)
+        : Newtonsoft.Json.Linq.JValue.CreateNull();
+      usageEvent["totalTokens"] = totalTokens.HasValue
+        ? new Newtonsoft.Json.Linq.JValue(totalTokens.Value)
+        : Newtonsoft.Json.Linq.JValue.CreateNull();
+      usageEvent["rawUsage"] = rawUsage == null
+        ? (Newtonsoft.Json.Linq.JToken)Newtonsoft.Json.Linq.JValue.CreateNull()
+        : rawUsage;
+      return usageEvent.ToString(Newtonsoft.Json.Formatting.None);
+    }]]></log-to-eventhub>
   </outbound>
   <on-error>
     <base />
+    <choose>
+      <when condition="@(context.Variables.ContainsKey(&quot;subject-id&quot;) &amp;&amp; context.Variables.ContainsKey(&quot;resource-group-id&quot;) &amp;&amp; context.Variables.ContainsKey(&quot;model-resource-id&quot;))">
+        <log-to-eventhub logger-id="usage-event-hub"><![CDATA[@{
+          var traceParent = context.Request.Headers.GetValueOrDefault("traceparent", string.Empty);
+          var traceMatch = System.Text.RegularExpressions.Regex.Match(
+            traceParent,
+            "^[0-9A-Fa-f]{2}-([0-9A-Fa-f]{32})-[0-9A-Fa-f]{16}-[0-9A-Fa-f]{2}$");
+          var traceId = traceMatch.Success ? traceMatch.Groups[1].Value.ToLowerInvariant() : string.Empty;
+          var eventKey = context.RequestId.ToString("D") + "|Anthropic|error";
+          var sha = System.Security.Cryptography.SHA256.Create();
+          var eventDigest = sha.ComputeHash(System.Text.Encoding.UTF8.GetBytes(eventKey));
+          sha.Dispose();
+          var eventId = Convert.ToBase64String(eventDigest).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+          var statusCode = context.Response == null ? 500 : context.Response.StatusCode;
+          var usageEvent = new Newtonsoft.Json.Linq.JObject();
+          usageEvent["schemaVersion"] = "1.0";
+          usageEvent["eventTimeUtc"] = DateTime.UtcNow.ToString("o");
+          usageEvent["eventId"] = eventId;
+          usageEvent["correlationId"] = context.RequestId.ToString("D");
+          usageEvent["traceId"] = string.IsNullOrEmpty(traceId)
+            ? (Newtonsoft.Json.Linq.JToken)Newtonsoft.Json.Linq.JValue.CreateNull()
+            : new Newtonsoft.Json.Linq.JValue(traceId);
+          usageEvent["provider"] = "Anthropic";
+          usageEvent["requestModel"] = "claude-opus-5";
+          usageEvent["responseModel"] = Newtonsoft.Json.Linq.JValue.CreateNull();
+          usageEvent["deploymentName"] = "claude-opus-5";
+          usageEvent["deploymentType"] = "GlobalStandard";
+          usageEvent["modelResourceId"] = (string)context.Variables["model-resource-id"];
+          usageEvent["resourceGroupId"] = (string)context.Variables["resource-group-id"];
+          usageEvent["teamId"] = (string)context.Variables["attribution-team"];
+          usageEvent["subjectId"] = (string)context.Variables["subject-id"];
+          usageEvent["projectId"] = "platform-engineering";
+          usageEvent["attributionMode"] = (string)context.Variables["attribution-mode"];
+          usageEvent["requestOutcome"] = "failed";
+          usageEvent["httpStatusCode"] = statusCode;
+          usageEvent["latencyMs"] = Math.Max(0L, (long)context.Elapsed.TotalMilliseconds);
+          usageEvent["tokenQuality"] = "missing";
+          usageEvent["inputTokens"] = Newtonsoft.Json.Linq.JValue.CreateNull();
+          usageEvent["cachedInputTokens"] = Newtonsoft.Json.Linq.JValue.CreateNull();
+          usageEvent["uncachedInputTokens"] = Newtonsoft.Json.Linq.JValue.CreateNull();
+          usageEvent["cacheWrite5mTokens"] = Newtonsoft.Json.Linq.JValue.CreateNull();
+          usageEvent["cacheWrite1hTokens"] = Newtonsoft.Json.Linq.JValue.CreateNull();
+          usageEvent["outputTokens"] = Newtonsoft.Json.Linq.JValue.CreateNull();
+          usageEvent["reasoningTokens"] = Newtonsoft.Json.Linq.JValue.CreateNull();
+          usageEvent["visibleOutputTokens"] = Newtonsoft.Json.Linq.JValue.CreateNull();
+          usageEvent["totalTokens"] = Newtonsoft.Json.Linq.JValue.CreateNull();
+          usageEvent["rawUsage"] = Newtonsoft.Json.Linq.JValue.CreateNull();
+          return usageEvent.ToString(Newtonsoft.Json.Formatting.None);
+        }]]></log-to-eventhub>
+      </when>
+    </choose>
   </on-error>
 </policies>

@@ -1,0 +1,278 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.example.invalid/ai-usage-event.v1.json",
+  "title": "AI usage event v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "eventTimeUtc",
+    "eventId",
+    "correlationId",
+    "traceId",
+    "provider",
+    "requestModel",
+    "responseModel",
+    "deploymentName",
+    "deploymentType",
+    "modelResourceId",
+    "resourceGroupId",
+    "teamId",
+    "subjectId",
+    "projectId",
+    "attributionMode",
+    "requestOutcome",
+    "httpStatusCode",
+    "latencyMs",
+    "tokenQuality",
+    "inputTokens",
+    "cachedInputTokens",
+    "uncachedInputTokens",
+    "cacheWrite5mTokens",
+    "cacheWrite1hTokens",
+    "outputTokens",
+    "reasoningTokens",
+    "visibleOutputTokens",
+    "totalTokens",
+    "rawUsage"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "1.0"
+    },
+    "eventTimeUtc": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "eventId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{43}$"
+    },
+    "correlationId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "traceId": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[0-9a-f]{32}$"
+    },
+    "provider": {
+      "enum": [
+        "OpenAI",
+        "Anthropic"
+      ]
+    },
+    "requestModel": {
+      "$ref": "#/$defs/modelName"
+    },
+    "responseModel": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/modelName"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "deploymentName": {
+      "$ref": "#/$defs/modelName"
+    },
+    "deploymentType": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "modelResourceId": {
+      "type": "string",
+      "pattern": "^/subscriptions/[0-9a-fA-F-]{36}/resourceGroups/[^/]+/providers/[^/]+/[^/]+/[^/]+$",
+      "maxLength": 512
+    },
+    "resourceGroupId": {
+      "type": "string",
+      "pattern": "^/subscriptions/[0-9a-fA-F-]{36}/resourceGroups/[^/]+$",
+      "maxLength": 256
+    },
+    "teamId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+    },
+    "subjectId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{43}$"
+    },
+    "projectId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+    },
+    "attributionMode": {
+      "enum": [
+        "entra",
+        "synthetic",
+        "agent"
+      ]
+    },
+    "requestOutcome": {
+      "enum": [
+        "succeeded",
+        "failed",
+        "unavailable",
+        "interrupted"
+      ]
+    },
+    "httpStatusCode": {
+      "type": "integer",
+      "minimum": 100,
+      "maximum": 599
+    },
+    "latencyMs": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "tokenQuality": {
+      "enum": [
+        "exact",
+        "partial",
+        "missing",
+        "interrupted",
+        "unavailable"
+      ]
+    },
+    "inputTokens": {
+      "$ref": "#/$defs/nullableTokens"
+    },
+    "cachedInputTokens": {
+      "$ref": "#/$defs/nullableTokens"
+    },
+    "uncachedInputTokens": {
+      "$ref": "#/$defs/nullableTokens"
+    },
+    "cacheWrite5mTokens": {
+      "$ref": "#/$defs/nullableTokens"
+    },
+    "cacheWrite1hTokens": {
+      "$ref": "#/$defs/nullableTokens"
+    },
+    "outputTokens": {
+      "$ref": "#/$defs/nullableTokens"
+    },
+    "reasoningTokens": {
+      "$ref": "#/$defs/nullableTokens"
+    },
+    "visibleOutputTokens": {
+      "$ref": "#/$defs/nullableTokens"
+    },
+    "totalTokens": {
+      "$ref": "#/$defs/nullableTokens"
+    },
+    "rawUsage": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/rawUsage"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "$defs": {
+    "modelName": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+    },
+    "nullableTokens": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "tokens": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "inputDetails": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "cached_tokens": {
+          "$ref": "#/$defs/tokens"
+        }
+      }
+    },
+    "outputDetails": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "reasoning_tokens": {
+          "$ref": "#/$defs/tokens"
+        },
+        "thinking_tokens": {
+          "$ref": "#/$defs/tokens"
+        }
+      }
+    },
+    "cacheCreation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "ephemeral_5m_input_tokens": {
+          "$ref": "#/$defs/tokens"
+        },
+        "ephemeral_1h_input_tokens": {
+          "$ref": "#/$defs/tokens"
+        }
+      }
+    },
+    "rawUsage": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "input_tokens": {
+          "$ref": "#/$defs/tokens"
+        },
+        "output_tokens": {
+          "$ref": "#/$defs/tokens"
+        },
+        "total_tokens": {
+          "$ref": "#/$defs/tokens"
+        },
+        "prompt_tokens": {
+          "$ref": "#/$defs/tokens"
+        },
+        "completion_tokens": {
+          "$ref": "#/$defs/tokens"
+        },
+        "cache_read_input_tokens": {
+          "$ref": "#/$defs/tokens"
+        },
+        "cache_creation_input_tokens": {
+          "$ref": "#/$defs/tokens"
+        },
+        "thinking_tokens": {
+          "$ref": "#/$defs/tokens"
+        },
+        "input_tokens_details": {
+          "$ref": "#/$defs/inputDetails"
+        },
+        "prompt_tokens_details": {
+          "$ref": "#/$defs/inputDetails"
+        },
+        "output_tokens_details": {
+          "$ref": "#/$defs/outputDetails"
+        },
+        "completion_tokens_details": {
+          "$ref": "#/$defs/outputDetails"
+        },
+        "cache_creation": {
+          "$ref": "#/$defs/cacheCreation"
+        }
+      }
+    }
+  }
+}

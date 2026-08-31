@@ -91,7 +91,13 @@
     metrics.textContent = 'Team: ' + result.team +
       ' | User: ' + result.user +
       ' | Input tokens: ' + result.inputTokens +
-      ' | Output tokens: ' + result.outputTokens +
+      ' | Uncached input: ' + result.uncachedInputTokens +
+      ' | Cache read: ' + result.cacheReadTokens +
+      ' | Cache write (5m): ' + result.cacheWrite5mTokens +
+      ' | Cache write (1h): ' + result.cacheWrite1hTokens +
+      ' | Visible output: ' + result.visibleOutputTokens +
+      ' | Reasoning/thinking: ' + result.reasoningTokens +
+      ' | Output total: ' + result.outputTokens +
       ' | Total tokens: ' + result.totalTokens +
       ' | Latency: ' + result.latencyMs + ' ms' +
       ' | Daily quota remaining: ' + remainingQuota;

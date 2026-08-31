@@ -2,13 +2,16 @@
 
 ## Demo purpose
 
-This demo shows how a shared AI platform can attribute usage across teams, users, models, and projects.
+This demo shows how a shared AI platform can attribute usage across teams,
+pseudonymous subjects, models, and projects.
 
 The demo compares GPT-5.4 with Claude Opus 5. It uses Azure API Management (APIM) as the AI Gateway.
 
 The central message is:
 
-> APIM and Foundry telemetry explain usage and enforce immediate controls. Azure Cost Management explains the bill. Join the views by model, project, team, and time window, but do not claim per-request billing precision.
+> APIM and Foundry telemetry explain usage and enforce immediate controls.
+> Resource-group FOCUS data explains actual cost. The allocation uses request
+> estimates as weights and does not claim per-request invoice precision.
 
 ## Requirements and design response
 
@@ -16,14 +19,15 @@ The central message is:
 | --- | --- |
 | Track tokens by model | APIM emits input, output, and total token metrics for each model route. |
 | Attribute usage to teams | An APIM product and subscription identify each synthetic team. |
-| Attribute usage to users | A validated Entra object ID identifies the presenter. Four fixed synthetic users create repeatable data. |
+| Attribute usage to individuals | APIM creates a stable HMAC pseudonym from validated or allow-listed identity. |
 | Compare providers | One application prompt calls GPT-5.4 and Claude Opus 5 through APIM. |
 | Apply immediate limits | APIM enforces one shared team limit across both model providers. |
 | Explain billed cost | Azure Cost Management shows actual cost by resource, meter, tag, and time. |
-| Support chargeback | Stable resource tags and the Foundry `project` tag support cost allocation. |
+| Allocate scoped cost | Resource-group FOCUS `BilledCost` and `EffectiveCost` use eligible request estimates as weights. |
 | Warn about spend | A resource-group budget sends alerts at 70% and 90% when recipients are configured. |
-| Export cost data | A daily compressed actual-cost export writes to Blob Storage. |
-| Combine critical signals | One Azure Monitor dashboard with Grafana shows usage, reliability, attribution, guardrails, resource inventory, budget state, and billed-cost snapshots. |
+| Export cost data | Managed FOCUS exports monitor only the main demo resource group. |
+| Operate the pipeline | A sibling FinOps support resource group has a separate budget and export monitoring. |
+| Report decisions and health | Two Grafana dashboards provide decision and pipeline views. A Workbook provides drill-downs. |
 
 ## Architecture
 
@@ -32,6 +36,12 @@ The central message is:
 [Edit the Excalidraw source](diagrams/cost-governance-flow.excalidraw)
 
 The APIM frontend stays public for this focused demo. APIM uses managed identity for both model backends.
+
+The main resource group contains the demo workload and attribution pipeline. The
+sibling `<main-resource-group>-finops` group contains Microsoft FinOps hubs v14,
+Data Factory, managed FOCUS export storage, a support budget, and export
+monitoring. The exports monitor exactly the main group. The support group does
+not enter demo totals.
 
 A production landing zone can add private endpoints, a virtual network, and Premium v2 APIM. These controls are not required to explain cost attribution.
 
@@ -43,7 +53,7 @@ This approach follows the Microsoft AI Landing Zone pattern of a Foundry landing
 
 1. The web application requests the `access_as_user` delegated scope.
 2. APIM validates the Entra token signature, issuer, audience, lifetime, and scope.
-3. APIM records the validated `oid` claim as the user.
+3. APIM derives an HMAC subject pseudonym from the validated tenant and `oid`.
 4. APIM records the Presenter product as the team.
 
 ### Synthetic traffic
@@ -57,21 +67,25 @@ The traffic generator uses dedicated Research and Engineering subscriptions. It 
 
 APIM rejects other values. APIM removes the synthetic user header before it calls the model.
 
-Synthetic traffic uses fixed, allow-listed users. Live attribution requires validated identity claims and an authoritative team mapping.
+Synthetic traffic uses fixed, allow-listed users. APIM converts each value to
+an HMAC subject pseudonym before Event Hubs. Live attribution requires validated
+identity claims and an authoritative team mapping.
 
 ### Metric dimensions
 
-The token metrics use these custom dimensions:
+The token metrics use exactly these configured dimensions:
 
+- `API ID`
+- `Subscription ID`
 - `Team`
-- `User`
 - `Model`
-- `Project`
 - `Attribution Mode`
 
-APIM also emits default API, operation, product, and subscription dimensions. The workbook derives the provider from the model.
+Individual, project, operation, correlation, trace, and complete provider token
+categories come from `AIRequestUsage_CL`. These fields do not come from metrics.
 
-Keep user identifiers out of custom metrics at production scale. Azure Monitor custom metrics have strict cardinality limits. Use logs or OpenTelemetry for high-cardinality user analysis.
+The subject value is a pseudonym. Keep the optional friendly alias map in an
+external, restricted system. Do not store it in this demo.
 
 ## Immediate controls and delayed financial controls
 
@@ -81,7 +95,7 @@ Keep user identifiers out of custom metrics at production scale. Azure Monitor c
 | 500,000 tokens per day | Request time | Apply a shared daily team allowance across both providers. |
 | 70% budget alert | Cost data refresh cycle | Warn when recipients are configured. |
 | 90% budget alert | Cost data refresh cycle | Escalate when recipients are configured. |
-| Daily cost export | Daily schedule | Supply detailed actual-cost data for later analysis. |
+| Managed FOCUS export | Delayed Cost Management schedule | Supply resource-group financial actuals. |
 
 A Cost Management budget is not a hard stop. APIM token limits are the immediate control.
 
@@ -95,8 +109,8 @@ Complete these actions before a live walkthrough:
 4. Generate traffic across both teams and both models.
 5. Record the exact UTC traffic window.
 6. Allow Cost Management data to refresh.
-7. Verify the workbook has no unexpected unknown attribution.
-8. Run the FinOps snapshot and verify the Grafana dashboard.
+7. Verify the Workbook has no unexpected unknown attribution.
+8. Verify both managed FOCUS exports and both Grafana dashboards.
 9. Capture fallback screenshots after the data is available.
 10. Save the traffic summary outside the repository.
 11. Keep all keys, tokens, tenant IDs, and confidential data out of screenshots.
@@ -107,10 +121,11 @@ Before the presentation, confirm that the selected time range contains:
 
 - Successful GPT-5.4 and Claude Opus 5 requests.
 - Research and Engineering traffic.
-- All configured synthetic users.
+- All configured synthetic subject pseudonyms.
 - Token, latency, quota, and correlation data.
 - Guardrail outcomes.
-- A recent FinOps snapshot.
+- Recent request usage and allocation rows.
+- A recent FOCUS export, or an explicit delayed-data state.
 - No unexpected unknown attribution values.
 
 ## Required browser tabs
@@ -118,13 +133,14 @@ Before the presentation, confirm that the selected time range contains:
 Open these tabs before the demo:
 
 1. AI Observability Demo: **Governed Model Comparison**
-2. Azure Monitor: **AI Observability and Cost** Grafana dashboard
-3. Azure portal: **AI Observability usage and cost governance** workbook
-4. Microsoft Foundry: GPT-5.4 deployment monitoring
-5. Microsoft Foundry: Claude Opus 5 deployment monitoring
-6. Azure portal: resource group **Cost analysis**
-7. Azure portal: resource group **Budgets**
-8. Azure portal: **Cost exports**
+2. Azure Monitor: **AI Usage and Cost Attribution** Grafana dashboard
+3. Azure Monitor: **Attribution Pipeline Operations** Grafana dashboard
+4. Azure portal: **AI Usage and Cost Investigation** Workbook
+5. Microsoft Foundry: GPT-5.4 deployment monitoring
+6. Microsoft Foundry: Claude Opus 5 deployment monitoring
+7. Azure portal: main resource group **Cost analysis**
+8. Azure portal: main and support resource group **Budgets**
+9. Azure portal: main resource-group **Cost exports**
 
 Use the same UTC window in the workbook, Foundry, and Cost Management.
 
@@ -221,26 +237,30 @@ State these limits:
 - Generated code still needs code, security, dependency, and license review.
 - Customer Copyright Commitment coverage also requires the documented metaprompt and retained evaluation evidence.
 
-### 11:00-16:00 - Present the unified Grafana dashboard
+### 11:00-16:00 - Present the reporting surfaces
 
 1. Set the dashboard time range to the recorded traffic window.
-2. Show model requests, success rate, P95 latency, and total tokens.
-3. Show token trends by model and team.
-4. Show team, user, model, and project attribution.
-5. Show dependency health and guardrail outcomes.
-6. Show billed cost, budget state, export state, and resource inventory.
-7. Show the data-freshness panel.
-8. Open the workbook only for deeper attribution filters.
+2. In **AI Usage and Cost Attribution**, show usage and rate-card estimates.
+3. Show allocated `BilledCost`, allocated `EffectiveCost`, and unallocated cost.
+4. Show team, model, project, and restricted subject attribution.
+5. Show resource-group Claude CCU status.
+6. Show subscription-wide Claude CCU only as excluded external context.
+7. In **Attribution Pipeline Operations**, show Capture, DCR, FOCUS, quarantine,
+   and reconciliation state.
+8. Open the Workbook for the request and allocation ledgers.
 
 Say:
 
-> The APIM subscription identifies the team. The validated object ID or restricted demo identity identifies the user. The model policy emits token data after the response.
+> The APIM subscription identifies the team. APIM converts the validated or
+> allow-listed subject to an HMAC pseudonym before Event Hubs.
 
-In the workbook, filter to `Research`, `research-user-1`, and `claude-opus-5`.
+In the Workbook, filter to `Research`, an approved subject pseudonym, and
+`claude-opus-5`.
 
 Say:
 
-> This is the operational allocation view. A production platform would send high-cardinality user data to logs or OpenTelemetry.
+> Metrics use five bounded dimensions. The structured request ledger contains
+> the individual, project, and complete token detail.
 
 ### 16:00-19:00 - Present Foundry monitoring
 
@@ -278,13 +298,15 @@ If time remains, run `weather-forecast-agent` to show one read-only MCP tool and
 5. Group by the stable `workload`, `costCentre`, and `project` tags.
 6. If available, group Foundry charges by the automatic `project` tag.
 7. Show the budget amount. Explain that 70% and 90% alerts require configured recipients.
-8. Show the daily actual-cost export.
+8. Show the daily and monthly managed FOCUS exports.
 
 Say:
 
-> Azure Cost Management is the source for billed cost. The gateway tells us who consumed tokens. We compare the views by model, project, team, and time window.
+> Resource-group FOCUS BilledCost and EffectiveCost are the financial authority.
+> The gateway estimates weight the allocation. Unmatched cost stays unallocated.
 
-If the Foundry project tag is absent, use the resource and meter view. Project-level cost attribution is a preview capability.
+If the resource-group FOCUS data omits Claude CCU, show actual as unavailable.
+Do not show zero. Keep the subscription-wide CCU total separate from demo totals.
 
 ### 23:00-25:00 - Show control and close
 
@@ -305,12 +327,15 @@ Token telemetry, estimated cost, and billed cost can differ for valid reasons:
 - APIM records provider-reported token usage at request time.
 - Foundry aggregates deployment metrics.
 - Azure Cost Management processes billing meters later.
+- Managed FOCUS exports and Data Factory add more delay.
 - OpenAI token types can have different rates.
 - Claude converts token activity into CCUs.
 - Private pricing can change the billed amount.
 - Requests can cross aggregation boundaries.
 - Retries, failed requests, caching, and rounding can affect each view.
-- Cost tags and preview project attribution might not cover every charge.
+- Only usage from the exact demo APIM and Foundry resource IDs is eligible.
+- Unmatched resource-group cost remains unallocated.
+- Subscription-wide Claude CCU context is never allocated.
 
 Compare trends and totals over a fixed time window. Do not promise exact request-to-invoice reconciliation.
 
@@ -345,45 +370,43 @@ Capture these screenshots after deployment:
 7. The active export schedule.
 8. One HTTP 429 quota response.
 
-Use this KQL query if the workbook does not load:
+Use this KQL query if the Workbook does not load:
 
 ```kusto
-customMetrics
-| where timestamp between (datetime(<start-utc>) .. datetime(<finish-utc>))
-| where name == "Total Tokens"
-| extend
-    Team = tostring(customDimensions["Team"]),
-    User = tostring(customDimensions["User"]),
-    Model = tostring(customDimensions["Model"]),
-    Project = tostring(customDimensions["Project"])
-| summarize Tokens = toint(sum(valueSum)), Requests = toint(sum(valueCount)) by Team, User, Model, Project
+AIRequestUsage_CL
+| where TimeGenerated between (datetime(<start-utc>) .. datetime(<finish-utc>))
+| where ResourceGroupId =~ "<exact-main-resource-group-id>"
+| where ModelResourceId =~ "<exact-foundry-resource-id>"
+| summarize
+    Tokens = sum(TotalTokens),
+    Requests = count(),
+    Estimate = sum(EstimatedCost)
+  by TeamId, SubjectId, Provider, ResponseModel, ProjectId
 | order by Tokens desc
 ```
 
 Use this KQL query to check data quality:
 
 ```kusto
-customMetrics
-| where timestamp > ago(24h)
-| where name == "Total Tokens"
-| extend
-    Team = tostring(customDimensions["Team"]),
-    User = tostring(customDimensions["User"]),
-    Model = tostring(customDimensions["Model"]),
-    Project = tostring(customDimensions["Project"])
+AIRequestUsage_CL
+| where TimeGenerated > ago(24h)
+| where ResourceGroupId =~ "<exact-main-resource-group-id>"
+| where ModelResourceId =~ "<exact-foundry-resource-id>"
 | summarize
-    LastMetricUtc = max(timestamp),
-    UnknownTeam = countif(isempty(Team) or Team == "Unknown"),
-    UnknownUser = countif(isempty(User) or User == "Unknown"),
-    UnknownModel = countif(isempty(Model) or Model == "Unknown"),
-    UnknownProject = countif(isempty(Project) or Project == "Unknown")
+    LastEventUtc = max(TimeGenerated),
+    UnknownTeam = countif(isempty(TeamId) or TeamId == "Unknown"),
+    UnknownSubject = countif(isempty(SubjectId)),
+    UnknownModel = countif(isempty(RequestModel) and isempty(ResponseModel)),
+    UnknownProject = countif(isempty(ProjectId)),
+    MissingUsage = countif(TokenQuality in ("missing", "interrupted", "unavailable"))
 ```
 
 ## Likely questions
 
 ### Can we allocate an exact invoice amount to each user?
 
-Not from these metrics alone. Use APIM for usage attribution. Use billing exports for actual cost. Apply an agreed allocation rule over a fixed period.
+Not as a direct invoice line. This demo allocates resource-group FOCUS actuals
+with eligible rate-card estimates as weights. It retains unallocated residuals.
 
 ### Can a budget stop model calls?
 
@@ -391,7 +414,8 @@ No. A budget sends delayed financial alerts. APIM token limits can stop calls at
 
 ### Why not send the user name as a metric?
 
-User data creates high metric cardinality and privacy risk. Use an opaque validated identifier. Use logs or OpenTelemetry at production scale.
+Individual data creates high metric cardinality and privacy risk. This demo uses
+an HMAC subject pseudonym in `AIRequestUsage_CL`, not in metric dimensions.
 
 ### Can teams bypass APIM?
 
@@ -429,7 +453,8 @@ It uses the Foundry and AI Gateway separation, PaaS services, policy, managed id
 
 The deployment uses direct Bicep resources instead of a full Azure Verified Modules landing zone.
 
-See [Observability and cost management](observability-and-cost-management.md) for the detailed checklist comparison and WAF assessment.
+See [Observability and cost management](observability-and-cost-management.md)
+for the signal, allocation, privacy, and production boundaries.
 
 ## Microsoft guidance
 

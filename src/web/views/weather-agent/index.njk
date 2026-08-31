@@ -99,8 +99,11 @@
     metrics.textContent = 'Agent: ' + payload.agentName +
       ' | Tool: ' + tools +
       ' | Input tokens: ' + payload.inputTokens +
-      ' | Visible output tokens: ' + (payload.outputTokens - payload.reasoningTokens) +
+      ' | Uncached input: ' + payload.uncachedInputTokens +
+      ' | Cached input: ' + payload.cachedInputTokens +
+      ' | Visible output tokens: ' + payload.visibleOutputTokens +
       ' | Reasoning tokens: ' + payload.reasoningTokens +
+      ' | Output total: ' + payload.outputTokens +
       ' | Total tokens: ' + payload.totalTokens;
     result.innerHTML = payload.html || '';
   });

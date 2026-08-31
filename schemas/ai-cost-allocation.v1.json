@@ -1,0 +1,210 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.example.invalid/ai-cost-allocation.v1.json",
+  "title": "AI cost allocation v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "TimeGenerated",
+    "RunId",
+    "AllocationVersion",
+    "SourceType",
+    "SourceScope",
+    "ChargePeriodStart",
+    "ChargePeriodEnd",
+    "BillingPeriodStart",
+    "BillingPeriodEnd",
+    "Provider",
+    "PublisherName",
+    "MeterId",
+    "MeterName",
+    "ResourceId",
+    "BillingCurrency",
+    "SourceQuantity",
+    "SourceUnit",
+    "SourceBilledCost",
+    "SourceEffectiveCost",
+    "TeamId",
+    "SubjectId",
+    "AllocationBasis",
+    "AllocationWeight",
+    "AllocationRatio",
+    "AllocatedBilledCost",
+    "AllocatedEffectiveCost",
+    "UnallocatedBilledCost",
+    "UnallocatedEffectiveCost",
+    "AttributionStatus",
+    "IncludedInWorkloadTotal",
+    "RateCardVersionId",
+    "UsageSnapshotId",
+    "SourcePath",
+    "SourceETag"
+  ],
+  "properties": {
+    "TimeGenerated": {
+      "$ref": "#/$defs/dateTime"
+    },
+    "RunId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "AllocationVersion": {
+      "const": "1.0"
+    },
+    "SourceType": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "SourceScope": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512
+    },
+    "ChargePeriodStart": {
+      "$ref": "#/$defs/nullableDateTime"
+    },
+    "ChargePeriodEnd": {
+      "$ref": "#/$defs/nullableDateTime"
+    },
+    "BillingPeriodStart": {
+      "$ref": "#/$defs/nullableDateTime"
+    },
+    "BillingPeriodEnd": {
+      "$ref": "#/$defs/nullableDateTime"
+    },
+    "Provider": {
+      "$ref": "#/$defs/nullableString"
+    },
+    "PublisherName": {
+      "$ref": "#/$defs/nullableString"
+    },
+    "MeterId": {
+      "$ref": "#/$defs/nullableString"
+    },
+    "MeterName": {
+      "$ref": "#/$defs/nullableString"
+    },
+    "ResourceId": {
+      "$ref": "#/$defs/nullableString"
+    },
+    "BillingCurrency": {
+      "oneOf": [
+        {
+          "type": "string",
+          "pattern": "^[A-Z]{3}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "SourceQuantity": {
+      "$ref": "#/$defs/nullableNumber"
+    },
+    "SourceUnit": {
+      "$ref": "#/$defs/nullableString"
+    },
+    "SourceBilledCost": {
+      "$ref": "#/$defs/nullableNumber"
+    },
+    "SourceEffectiveCost": {
+      "$ref": "#/$defs/nullableNumber"
+    },
+    "TeamId": {
+      "$ref": "#/$defs/nullableString"
+    },
+    "SubjectId": {
+      "oneOf": [
+        {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{43}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "AllocationBasis": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "AllocationWeight": {
+      "$ref": "#/$defs/nullableNumber"
+    },
+    "AllocationRatio": {
+      "oneOf": [
+        {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "AllocatedBilledCost": {
+      "$ref": "#/$defs/nullableNumber"
+    },
+    "AllocatedEffectiveCost": {
+      "$ref": "#/$defs/nullableNumber"
+    },
+    "UnallocatedBilledCost": {
+      "$ref": "#/$defs/nullableNumber"
+    },
+    "UnallocatedEffectiveCost": {
+      "$ref": "#/$defs/nullableNumber"
+    },
+    "AttributionStatus": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 96
+    },
+    "IncludedInWorkloadTotal": {
+      "type": "boolean"
+    },
+    "RateCardVersionId": {
+      "$ref": "#/$defs/nullableString"
+    },
+    "UsageSnapshotId": {
+      "$ref": "#/$defs/nullableString"
+    },
+    "SourcePath": {
+      "$ref": "#/$defs/nullableString"
+    },
+    "SourceETag": {
+      "$ref": "#/$defs/nullableString"
+    }
+  },
+  "$defs": {
+    "dateTime": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "nullableDateTime": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/dateTime"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "nullableString": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 1024
+    },
+    "nullableNumber": {
+      "type": [
+        "number",
+        "null"
+      ]
+    }
+  }
+}

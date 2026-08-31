@@ -7,7 +7,7 @@ Use this index to find setup, operation, architecture, demonstration, and design
 | Document | Purpose |
 | --- | --- |
 | [Runbook](RUNBOOK.md) | Deploy, verify, operate, troubleshoot, and remove the Azure resources. |
-| [Architecture](architecture.md) | Understand the main components and their data flows. |
+| [Architecture](architecture.md) | Review the two resource groups and their data flows. |
 | [Observability and cost management](observability-and-cost-management.md) | Understand telemetry, attribution, cost data, privacy boundaries, and operational gaps. |
 
 ## Present the scenarios
@@ -42,5 +42,5 @@ pwsh ./demo-scripts/open-presenter.ps1 -Slide 1 -Range 24h
 | [Foundry prompt agents](../agents/README.md) | Review the weather agent and MCP connection. |
 | [Web application](../src/web/README.md) | Run and configure the Express application. |
 
-Deployment source files for the Azure Monitor dashboard and workbook are in
+Find the deployment source files for both Azure Monitor dashboards and the Workbook in
 [`infra/dashboards`](../infra/dashboards) and [`infra/workbooks`](../infra/workbooks).
