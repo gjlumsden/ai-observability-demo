@@ -108,12 +108,27 @@ function requireAuth(req, res, next) {
 // or within the refresh buffer, so the browser client can call /.auth/refresh and retry.
 // Must be placed after requireAuth in the middleware chain.
 function requireFreshProviderToken(req, res, next) {
-  if (req.user && isProviderTokenExpired(req.user.tokenExpiresAt)) {
-    return res.status(401).json({
-      code: 'PROVIDER_TOKEN_EXPIRED',
-      error: 'The provider access token has expired. Refresh the session and try again.'
-    });
+  // If no user is present, let requireAuth handle it earlier in the chain.
+  if (req.user) {
+    // Reject a missing or blank provider access token before any downstream call.
+    // Do NOT log or parse token contents here; keep JWT validation to the platform.
+    const token = req.user.accessToken;
+    if (token == null || (typeof token === 'string' && token.trim() === '')) {
+      return res.status(401).json({
+        code: 'PROVIDER_TOKEN_MISSING',
+        error: 'Provider access token is missing. Please sign in again.'
+      });
+    }
+
+    // Then check expiry as before.
+    if (isProviderTokenExpired(req.user.tokenExpiresAt)) {
+      return res.status(401).json({
+        code: 'PROVIDER_TOKEN_EXPIRED',
+        error: 'The provider access token has expired. Refresh the session and try again.'
+      });
+    }
   }
+
   return next();
 }
 

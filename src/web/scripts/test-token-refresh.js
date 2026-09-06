@@ -207,6 +207,52 @@ async function runServerTests() {
     await assertNotExpired('/model-comparison/run',
       { prompt: 'test' }, null, '3c model-comparison no expiry header');
 
+    // 3d. Missing or empty provider access token — must be rejected early with
+    //      401/PROVIDER_TOKEN_MISSING before any downstream handler or APIM call.
+    const protectedPaths = [
+      '/model-comparison/run',
+      '/scientific-code-explainer/explain',
+      '/scientific-code-explainer/check-protected-code',
+      '/weather-agent/run'
+    ];
+
+    for (const path of protectedPaths) {
+      const baseHeaders = {
+        'x-ms-client-principal-id': 'test-user-id',
+        'x-ms-client-principal-name': 'test@example.invalid',
+        'Content-Type': 'application/json'
+      };
+
+      const bodyByPath = {
+        '/model-comparison/run': { prompt: 'test' },
+        '/scientific-code-explainer/explain': { prompt: 'test code' },
+        '/scientific-code-explainer/check-protected-code': { code: 'x'.repeat(120) },
+        '/weather-agent/run': { prompt: 'test weather' }
+      };
+
+      // Missing header
+      const resMissing = await fetch(`${base}${path}`, {
+        method: 'POST',
+        headers: baseHeaders,
+        body: JSON.stringify(bodyByPath[path])
+      });
+      assert.equal(resMissing.status, 401, `3d ${path} missing token: expected HTTP 401`);
+      const payloadMissing = await resMissing.json();
+      assert.equal(payloadMissing.code, 'PROVIDER_TOKEN_MISSING',
+        `3d ${path} missing token: expected PROVIDER_TOKEN_MISSING code`);
+
+      // Explicit empty token header
+      const resEmpty = await fetch(`${base}${path}`, {
+        method: 'POST',
+        headers: { ...baseHeaders, 'x-ms-token-aad-access-token': '' },
+        body: JSON.stringify(bodyByPath[path])
+      });
+      assert.equal(resEmpty.status, 401, `3d ${path} empty token: expected HTTP 401`);
+      const payloadEmpty = await resEmpty.json();
+      assert.equal(payloadEmpty.code, 'PROVIDER_TOKEN_MISSING',
+        `3d ${path} empty token: expected PROVIDER_TOKEN_MISSING code`);
+    }
+
     console.log('(3) Server endpoint token expiry tests passed.');
   } finally {
     await new Promise((resolve) => server.close(resolve));
