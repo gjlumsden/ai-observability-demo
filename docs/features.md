@@ -297,17 +297,21 @@ live environment.
     The same logical record always produces the same `RecordId`. A re-run appends
     idempotent rows that a query deduplicates.
   - `run-complete` marker: one row per run with `RecordType='run-complete'` and
-    `AttributionStatus='run-complete'`. It carries `ExpectedRecordCount`, the number
-    of allocation rows the run produced.
-  - Completeness check: a consumer treats a run as complete only when the
-    `run-complete` marker exists for the `RunId` and the count of allocation rows
-    equals `ExpectedRecordCount`. A partial or duplicated append is detectable.
+    `AttributionStatus='run-complete'`. The processor emits it only after all
+    ingestion batches succeed. It carries `ExpectedRecordCount`, the number of
+    allocation rows the run produced.
+  - Completeness check: a consumer deduplicates rows with
+    `summarize arg_max(TimeGenerated, *) by RunId, RecordId`, then counts the
+    allocation rows per `RunId` with exact `count()`. A run is complete only when the
+    `run-complete` marker exists for the `RunId` and that count equals the latest
+    marker's `ExpectedRecordCount`. A partial or duplicated append is detectable.
   - Per-attempt `RunId`: each processing attempt derives a deterministic `RunId`
     from the source type, path, ETag, and attempt number. A retried attempt is
     distinct and repeatable.
-  - Selection: a query deduplicates by `RecordId`, gates on the exact
-    `ExpectedRecordCount`, then selects the latest successful `RunId`. A partial
-    attempt is never selected.
+  - Selection: the query deduplicates by `RunId` and `RecordId`, uses exact
+    `count()` per `RunId`, requires equality with the latest marker's
+    `ExpectedRecordCount`, excludes the marker rows from cost totals, and selects the
+    latest complete run per source identity. A partial attempt is never selected.
 - View (Azure): `AICostAllocation_CL` rows. Filter `RecordType == 'run-complete'`
   for the markers.
 - View (local): `src/usage-processor/usage_processor/allocation.py`
@@ -439,8 +443,8 @@ live environment.
     `CHECKPOINT_IDLE_SECONDS`.
   - `idle`: the partition is empty; or the checkpoint is caught up and the last
     event age is at least `CHECKPOINT_IDLE_SECONDS`.
-  - `lagging`: the checkpoint is behind the partition tail and its age is below
-    `CHECKPOINT_STALE_SECONDS`.
+  - `lagging`: the checkpoint has a positive sequence lag and its age is below
+    `CHECKPOINT_STALE_SECONDS`. There is no separate lag threshold.
   - `stale`: the checkpoint is behind the partition tail and its age is at least
     `CHECKPOINT_STALE_SECONDS`.
   - `missing`: the partition is nonempty and the expected checkpoint blob does not
@@ -472,9 +476,9 @@ live environment.
   `CHECKPOINT_IDLE_SECONDS`. The user-assigned identity selection uses the existing
   `AIUsageEventHub__clientId` and `AzureWebJobsStorage__clientId` settings.
 - Thresholds: the app settings `CHECKPOINT_STALE_SECONDS` and
-  `CHECKPOINT_IDLE_SECONDS` are set to `900` seconds, the default for both, in
-  `infra/modules/usage-processor.bicep`. They surface in the telemetry as
-  `staleThresholdSeconds` and `idleThresholdSeconds`.
+  `CHECKPOINT_IDLE_SECONDS` are each a positive integer number of seconds. The
+  default for both is `900`, set in `infra/modules/usage-processor.bicep`. They
+  surface in the telemetry as `staleThresholdSeconds` and `idleThresholdSeconds`.
 - View (Azure): `AppTraces` filtered by the message prefix. The Attribution
   Pipeline Operations dashboard.
 

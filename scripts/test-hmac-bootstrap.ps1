@@ -296,14 +296,15 @@ function Test-AllocationFreshnessAlertContracts {
         $freshnessBlock.Contains('ActualRecordCount == ExpectedRecordCount')
     ) 'The allocation freshness alert must require a verified complete run before freshness evaluation.'
     Assert-True (
-        $freshnessBlock.Contains('let ScopedCompleteRuns = CompleteRuns | where SourceScope =~ "${workloadResourceGroupId}" | summarize arg_max(TimeGenerated, *) by SourceType, SourceScope, SourcePath')
-    ) 'The allocation freshness alert must compute freshness from scope-filtered completed runs.'
+        $freshnessBlock.Contains('let ScopedCompleteRuns = CompleteRuns | where SourceType == "${finopsHubFocusSourceType}" and SourceScope =~ "${workloadResourceGroupId}" | summarize arg_max(TimeGenerated, *) by SourceType, SourceScope, SourcePath')
+    ) 'The allocation freshness alert must compute freshness from scope-filtered FOCUS completed runs.'
     Assert-True (
         $freshnessBlock.Contains('union (ScopedCompleteRuns | summarize LastSeen=max(TimeGenerated)), (print LastSeen=datetime(1970-01-01))')
     ) 'The allocation freshness alert must fall back to an empty baseline only after scope-filtered completion lookup.'
     Assert-True (
-        -not $freshnessBlock.Contains('IncludedInWorkloadTotal == true | summarize LastSeen=max(TimeGenerated)')
-    ) 'The allocation freshness alert must not use raw workload rows to determine freshness.'
+        -not $freshnessBlock.Contains('IncludedInWorkloadTotal == true | summarize LastSeen=max(TimeGenerated)') -and
+        -not $freshnessBlock.Contains('dcount(RecordId)')
+    ) 'The allocation freshness alert must not use raw workload rows or approximate counts to determine freshness.'
 
     Write-Host 'Validated allocation freshness alert latest-complete-run contract.'
 }
@@ -334,8 +335,8 @@ function Test-ReconciliationAlertContracts {
         $reconciliationBlock.Contains('ActualRecordCount == ExpectedRecordCount')
     ) 'The reconciliation drift alert must require a verified complete run before reconciliation.'
     Assert-True (
-        $reconciliationBlock.Contains('summarize arg_max(TimeGenerated, *) by SourceType, SourceScope, SourcePath')
-    ) 'The reconciliation drift alert must select the latest verified run for each source path.'
+        $reconciliationBlock.Contains('let LatestRuns = CompleteRuns | where SourceType == "${finopsHubFocusSourceType}" and SourceScope =~ "${workloadResourceGroupId}" | summarize arg_max(TimeGenerated, *) by SourceType, SourceScope, SourcePath')
+    ) 'The reconciliation drift alert must select the latest verified FOCUS run for each source path.'
     Assert-True (
         $reconciliationBlock.Contains('project RunId, CompletionTime = TimeGenerated')
     ) 'The reconciliation drift alert must evaluate the completion time of the verified latest run.'
@@ -346,8 +347,9 @@ function Test-ReconciliationAlertContracts {
         $reconciliationBlock.Contains('join kind=inner (AllocationRows | where IncludedInWorkloadTotal == true) on RunId')
     ) 'The reconciliation drift alert must reconcile only workload-total allocation rows from the verified latest run.'
     Assert-True (
-        -not $reconciliationBlock.Contains('summarize arg_max(TimeGenerated, *) by RecordId')
-    ) 'The reconciliation drift alert must not deduplicate allocation rows by RecordId alone.'
+        -not $reconciliationBlock.Contains('summarize arg_max(TimeGenerated, *) by RecordId') -and
+        -not $reconciliationBlock.Contains('dcount(RecordId)')
+    ) 'The reconciliation drift alert must not deduplicate allocation rows by RecordId alone or use approximate counts.'
     Assert-True (
         -not $reconciliationBlock.Contains('let ScopedRows = AICostAllocation_CL | where SourceScope =~ "${workloadResourceGroupId}" and IncludedInWorkloadTotal == true; let LatestRuns = ScopedRows | summarize arg_max(TimeGenerated, RunId) by SourcePath')
     ) 'The reconciliation drift alert must not use the older unverified latest-run contract.'

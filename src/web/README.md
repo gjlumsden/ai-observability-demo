@@ -30,7 +30,9 @@ sign-out use the reserved `/.auth/*` paths.
 The app runs no authentication library. It manages no session, cookie, or client
 secret in app code. This is the Microsoft-approved MISE-compliant path for Node and
 Express on App Service. App Service Authentication
-activates when the postprovision hook populates the Entra client ID.
+activates when the postprovision hook populates the Entra client ID. For the platform
+feature, see the public reference
+[Azure App Service authentication and authorization](https://learn.microsoft.com/azure/app-service/overview-authentication-authorization).
 
 There is no local authentication bypass. The sign-in route sanitizes the `returnTo`
 target and falls back to a default path for an unsafe value. The app does not parse
