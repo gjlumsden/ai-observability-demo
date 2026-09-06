@@ -425,6 +425,12 @@ function Test-CiWorkflowContracts {
     Assert-True (
         $workflow.Contains('.\scripts\test-token-cost-attribution.ps1')
     ) 'The CI workflow does not run the release acceptance script.'
+    Assert-True (
+        $workflow.Contains('npm.cmd audit --audit-level=high --prefix .\src\web')
+    ) 'The CI workflow must fail on high or critical npm audit findings.'
+    Assert-True (
+        -not $workflow.Contains('postdeploy:auth-acceptance')
+    ) 'The offline CI workflow must not run the postdeployment authentication harness.'
 
     $actionReferences = @(
         [regex]::Matches($workflow, '(?m)^\s*uses:\s+[^@\s]+@([^\s#]+)') |
@@ -477,6 +483,7 @@ try {
     foreach ($test in @(
         'test:auth-logging'
         'test:auth-validation'
+        'test:easyauth-harness-guards'
         'test:dependency-security'
         'test:usage'
         'test:weather'

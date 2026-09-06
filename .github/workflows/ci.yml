@@ -19,7 +19,6 @@ jobs:
     timeout-minutes: 30
     env:
       NPM_CONFIG_REGISTRY: https://packagefeedproxy.microsoft.io/npm/
-      NPM_CONFIG_REPLACE_REGISTRY_HOST: always
       NPM_CONFIG_AUDIT: "false"
       PIP_DISABLE_PIP_VERSION_CHECK: "1"
       PIP_INDEX_URL: https://packagefeedproxy.microsoft.io/pypi/simple
@@ -59,6 +58,12 @@ jobs:
       - name: Install Node.js dependencies
         shell: pwsh
         run: npm.cmd ci --prefix .\src\web
+
+      - name: Audit Node.js dependencies
+        shell: pwsh
+        env:
+          NPM_CONFIG_AUDIT: "true"
+        run: npm.cmd audit --audit-level=high --prefix .\src\web
 
       - name: Run release acceptance checks
         shell: pwsh

@@ -169,16 +169,34 @@ contracts. It does not deploy to Azure.
 | Runner | Windows hosted runner (`windows-latest`) |
 | Node.js | 24 |
 | Python | 3.12 |
-| Bicep CLI | 0.45.15, downloaded and verified by SHA-256 before use |
+| Bicep CLI | 0.45.15, downloaded from the public upstream release and verified with its pinned SHA-256 |
 | npm source | Microsoft npm proxy: `https://packagefeedproxy.microsoft.io/npm/` |
 | pip source | Microsoft pip proxy: `https://packagefeedproxy.microsoft.io/pypi/simple` |
 | GitHub Actions | Each action reference uses a pinned full commit SHA. |
 | Repository permission | `contents: read` only. Checkout does not persist credentials. |
-| Azure operations | No Azure credentials, sign-in, write, or deployment. |
+| Azure operations | No Azure sign-in, Azure credential, OIDC write permission, deployment, or Azure write. |
 | Acceptance entry point | Existing release acceptance script: `scripts/test-token-cost-attribution.ps1` |
 
 The workflow installs the pinned dependencies, verifies the Bicep CLI digest, and
-runs the existing release acceptance script.
+runs the existing release acceptance script `scripts/test-token-cost-attribution.ps1`.
+The script verifies the pinned FinOps artifact, the APIM policy contracts, the
+lifecycle hooks, the HMAC and lifecycle Bicep modules, the dashboard and workbook
+queries, the teardown contracts, the main and FinOps wrapper Bicep builds, the
+Function contracts, the allocation contracts, all Python `unittest` tests, the Node
+build, and the existing Node auth, security, usage, and weather tests.
+
+### Validation limits
+
+The workflow runs local and static checks only. It does not deploy. The state is in
+repository, not deployed.
+
+- Local and static coverage: checkpoint path, age, lag, statuses, safe trace fields,
+  settings, and error propagation; the query contracts; JSON parsing; Bicep
+  compilation; the warning baseline; PowerShell StrictMode tests; the Python tests;
+  the Node tests; and `actionlint`.
+- Deployed-environment confirmation only: live managed-identity access, Event Hubs
+  partition reads, checkpoint blob reads and `LastModified` movement, `AppTraces`
+  ingestion and cadence, alert behavior, and dashboard and workbook rendering.
 
 ## Interface status
 
