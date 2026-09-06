@@ -276,8 +276,6 @@ resource functionAppSettings 'Microsoft.Web/sites/config@2024-04-01' = {
   parent: functionApp
   name: 'appsettings'
   properties: {
-    FUNCTIONS_EXTENSION_VERSION: '~4'
-    FUNCTIONS_WORKER_RUNTIME: 'python'
     AzureWebJobsStorage__accountName: storageAccount.name
     AzureWebJobsStorage__blobServiceUri: storageBlobEndpoint
     AzureWebJobsStorage__queueServiceUri: storageQueueEndpoint
@@ -290,6 +288,8 @@ resource functionAppSettings 'Microsoft.Web/sites/config@2024-04-01' = {
     AIUsageEventHub__clientId: processorIdentity.properties.clientId
     AI_USAGE_EVENT_HUB_NAME: usageEventHub.name
     AI_USAGE_CONSUMER_GROUP: eventHubConsumerGroupName
+    CHECKPOINT_STALE_SECONDS: '900'
+    CHECKPOINT_IDLE_SECONDS: '900'
     USAGE_STORAGE_ACCOUNT_NAME: storageAccount.name
     USAGE_STORAGE_BLOB_ENDPOINT: storageBlobEndpoint
     USAGE_STORAGE_QUEUE_ENDPOINT: storageQueueEndpoint

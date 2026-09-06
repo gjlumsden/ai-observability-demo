@@ -9,8 +9,6 @@ const path = require('path');
 const crypto = require('crypto');
 const express = require('express');
 const nunjucks = require('nunjucks');
-const session = require('express-session');
-const cookieParser = require('cookie-parser');
 const helmet = require('helmet');
 const morgan = require('morgan');
 
@@ -21,16 +19,11 @@ const authRoutes = require('./routes/auth');
 const healthRoutes = require('./routes/health');
 const weatherApiRoutes = require('./routes/weather-api');
 const weatherAgentRoutes = require('./routes/weather-agent');
+const { readAuth } = require('./middleware/auth');
 const { trackRequestException } = require('./lib/telemetry');
 
 const app = express();
 const isProduction = process.env.NODE_ENV === 'production';
-const sessionSecret = process.env.SESSION_SECRET
-  || (!isProduction ? crypto.randomBytes(48).toString('base64url') : null);
-
-if (!sessionSecret) {
-  throw new Error('SESSION_SECRET is required when NODE_ENV is production.');
-}
 
 const env = nunjucks.configure([
   path.join(__dirname, 'views'),
@@ -79,36 +72,27 @@ const accessLogFormat = isProduction
   ? ':remote-addr - :remote-user [:date[clf]] ":method :safe-url HTTP/:http-version" :status :res[content-length] ":referrer" ":user-agent"'
   : ':method :safe-url :status :response-time ms - :res[content-length]';
 app.use(morgan(accessLogFormat));
-app.use(cookieParser());
 app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 app.use(express.json({ limit: '1mb' }));
 app.use(weatherApiRoutes);
 app.use('/govuk', express.static(path.join(__dirname, 'node_modules', 'govuk-frontend', 'dist', 'govuk')));
 app.use(express.static(path.join(__dirname, 'public')));
 
-app.use(session({
-  name: 'ai-observability-demo.sid',
-  secret: sessionSecret,
-  resave: false,
-  saveUninitialized: false,
-  cookie: {
-    httpOnly: true,
-    secure: isProduction,
-    sameSite: 'lax'
-  }
-  // Demo only: MemoryStore is not suitable for production scale-out.
-}));
+// Reads the identity Azure App Service Authentication (Easy Auth/MISE) already validated
+// upstream. There is no local session store: the platform's own encrypted auth session
+// cookie and token store carry the authenticated state between requests.
+app.use(readAuth);
 
 app.use((req, res, next) => {
   res.locals.currentPath = req.path;
-  res.locals.isAuthenticated = Boolean(req.session?.account);
-  res.locals.user = req.session?.account || null;
+  res.locals.isAuthenticated = Boolean(req.user);
+  res.locals.user = req.user;
   res.locals.navigation = [
     { href: '/', text: 'Home', active: req.path === '/' },
     { href: '/model-comparison', text: 'Model comparison', active: req.path.startsWith('/model-comparison') },
     { href: '/scientific-code-explainer', text: 'Code explainer', active: req.path.startsWith('/scientific-code-explainer') },
     { href: '/weather-agent', text: 'Weather agent', active: req.path.startsWith('/weather-agent') },
-    req.session?.account
+    req.user
       ? { href: '/auth/signout', text: 'Sign out', active: false }
       : { href: '/auth/signin', text: 'Sign in', active: req.path.startsWith('/auth') }
   ];

@@ -61,7 +61,10 @@ var usageColumns = [
 var allocationColumns = [
   { name: 'TimeGenerated', type: 'datetime' }
   { name: 'RunId', type: 'string' }
+  { name: 'RecordId', type: 'string' }
+  { name: 'RecordType', type: 'string' }
   { name: 'AllocationVersion', type: 'string' }
+  { name: 'ExpectedRecordCount', type: 'long' }
   { name: 'SourceType', type: 'string' }
   { name: 'SourceScope', type: 'string' }
   { name: 'ChargePeriodStart', type: 'datetime' }

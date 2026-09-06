@@ -6,11 +6,13 @@ import unittest
 import bootstrap  # noqa: F401
 
 from usage_processor.event_service import process_event_batch
+from usage_processor.errors import ConfigurationError
 from usage_processor.rates import RateCard
+from usage_processor.settings import Settings
 from usage_processor.state import InMemoryStateStore
 from usage_processor.validation import ContractValidator
 
-from helpers import RESOURCE_GROUP_ID, valid_event
+from helpers import MODEL_RESOURCE_ID, RESOURCE_GROUP_ID, valid_event
 
 
 class FakeEvent:
@@ -56,7 +58,7 @@ class RecordingQuarantine:
 def settings():
     return SimpleNamespace(
         workload_resource_group_id=RESOURCE_GROUP_ID,
-        workload_model_resource_ids=(),
+        workload_model_resource_ids=(MODEL_RESOURCE_ID,),
         dcr_usage_stream="Custom-AIRequestUsage_CL",
         event_hub_namespace="example.servicebus.windows.net",
         event_hub_name="ai-usage",
@@ -91,6 +93,29 @@ class EventServiceTests(unittest.TestCase):
         self.assertEqual(row["EventHubSequenceNumber"], 7)
         self.assertIn("/1/2026/08/28/12/", row["ArchivePath"])
         self.assertEqual(quarantine.records, [])
+
+    def test_duplicate_event_ids_in_one_batch_are_coalesced_before_claim(self):
+        state = InMemoryStateStore()
+        ingestion = RecordingWriter()
+        body = json.dumps(valid_event()).encode()
+
+        result = process_event_batch(
+            [FakeEvent(body), FakeEvent(body)],
+            settings=settings(),
+            validator=ContractValidator(),
+            rate_card=RateCard.load(),
+            state_store=state,
+            quarantine_writer=RecordingQuarantine(),
+            ingestion_writer=ingestion,
+        )
+
+        self.assertEqual(result, {
+            "accepted": 1,
+            "quarantined": 0,
+            "duplicates": 1,
+        })
+        self.assertEqual(len(ingestion.calls), 1)
+        self.assertEqual(len(ingestion.calls[0][1]), 1)
 
     def test_malformed_event_is_quarantined_without_raw_payload(self):
         state = InMemoryStateStore()
@@ -189,6 +214,51 @@ class EventServiceTests(unittest.TestCase):
             quarantine.records[0]["reason"],
             "usage-resource-group-mismatch",
         )
+
+    def test_non_allowlisted_model_resource_is_quarantined(self):
+        event = valid_event(
+            modelResourceId=(
+                RESOURCE_GROUP_ID
+                + "/providers/Microsoft.CognitiveServices/accounts/other"
+            )
+        )
+        quarantine = RecordingQuarantine()
+
+        result = process_event_batch(
+            [FakeEvent(json.dumps(event).encode())],
+            settings=settings(),
+            validator=ContractValidator(),
+            rate_card=RateCard.load(),
+            state_store=InMemoryStateStore(),
+            quarantine_writer=quarantine,
+            ingestion_writer=RecordingWriter(),
+        )
+
+        self.assertEqual(result["quarantined"], 1)
+        self.assertEqual(
+            quarantine.records[0]["reason"],
+            "usage-model-resource-not-allowlisted",
+        )
+
+    def test_usage_ingestion_requires_model_resource_allowlist(self):
+        configured = Settings.from_env(
+            {
+                "USAGE_STORAGE_BLOB_ENDPOINT": "https://storage.blob.core.windows.net",
+                "USAGE_STORAGE_TABLE_ENDPOINT": "https://storage.table.core.windows.net",
+                "USAGE_PROCESSOR_STATE_TABLE": "state",
+                "USAGE_QUARANTINE_CONTAINER": "quarantine",
+                "DCR_ENDPOINT": "https://example.ingest.monitor.azure.com",
+                "DCR_IMMUTABLE_ID": "dcr-immutable",
+                "DCR_USAGE_STREAM": "Custom-AIRequestUsage_CL",
+                "WORKLOAD_RESOURCE_GROUP_ID": RESOURCE_GROUP_ID,
+            }
+        )
+
+        with self.assertRaisesRegex(
+            ConfigurationError,
+            "WORKLOAD_MODEL_RESOURCE_IDS",
+        ):
+            configured.require_usage_ingestion()
 
 
 if __name__ == "__main__":

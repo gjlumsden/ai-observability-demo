@@ -1,0 +1,2 @@
+# Preserve upstream release bytes for checksum verification on every platform.
+infra/vendor/finops-toolkit/** -text

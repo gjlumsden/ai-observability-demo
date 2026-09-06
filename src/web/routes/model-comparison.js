@@ -8,7 +8,7 @@ const {
 const { normalizeClaudeResponse } = require('../lib/claude');
 const { renderMarkdown } = require('../lib/markdown');
 const { modelComparisonSamples } = require('../lib/scenario-prompts');
-const { requireAuth } = require('../middleware/auth');
+const { requireAuth, requireFreshProviderToken } = require('../middleware/auth');
 
 const router = express.Router();
 const MAX_PROMPT_LENGTH = 4000;
@@ -37,7 +37,7 @@ router.get('/model-comparison', requireAuth, (req, res) => {
   });
 });
 
-router.post('/model-comparison/run', requireAuth, async (req, res, next) => {
+router.post('/model-comparison/run', requireAuth, requireFreshProviderToken, async (req, res, next) => {
   try {
     const prompt = (req.body.prompt || '').trim();
     if (!prompt) {
@@ -53,7 +53,7 @@ router.post('/model-comparison/run', requireAuth, async (req, res, next) => {
     const correlationId = crypto.randomUUID();
     const sharedCall = {
       subscriptionKey: process.env.APIM_PRESENTER_KEY,
-      bearerToken: req.session.accessToken
+      bearerToken: req.user.accessToken
     };
 
     const [openAi, claude] = await Promise.all([

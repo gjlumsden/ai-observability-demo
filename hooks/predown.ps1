@@ -1,8 +1,12 @@
+[CmdletBinding()]
+param()
+
 $ErrorActionPreference = 'Stop'
+$repoRoot = Split-Path -Parent $PSScriptRoot
 
 function Get-AzdEnvironmentValues {
     $values = @{}
-    $output = azd env get-values 2>$null
+    $output = azd env get-values --cwd $repoRoot 2>$null
     if ($LASTEXITCODE -eq 0) {
         foreach ($line in $output) {
             if ($line -match '^\s*([^=]+)=(.*)\s*$') {

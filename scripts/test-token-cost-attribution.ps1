@@ -31,6 +31,28 @@ function Invoke-CheckedNative {
     }
 }
 
+function Resolve-BicepExecutable {
+    $candidates = [System.Collections.Generic.List[string]]::new()
+    if ($env:BICEP_CLI_PATH) {
+        $candidates.Add($env:BICEP_CLI_PATH)
+    }
+
+    $pathCommand = Get-Command bicep -CommandType Application -ErrorAction SilentlyContinue
+    if ($null -ne $pathCommand -and $pathCommand.Source) {
+        $candidates.Add($pathCommand.Source)
+    }
+
+    $candidates.Add((Join-Path $HOME '.azure\bin\bicep.exe'))
+
+    foreach ($candidate in $candidates) {
+        if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+            return (Resolve-Path -LiteralPath $candidate).Path
+        }
+    }
+
+    throw 'The Bicep CLI executable is not available. Set BICEP_CLI_PATH.'
+}
+
 function Get-NamedStringValues {
     param(
         [AllowNull()] $Value,
@@ -112,6 +134,13 @@ function Test-DashboardContracts {
         Assert-True (
             $isWorkloadQuery -or $isExternalQuery
         ) 'An allocation query does not select an approved workload or external scope.'
+        Assert-True (
+            $query.Contains('RecordType == "allocation"') -and
+            $query.Contains('RecordType == "run-complete"') -and
+            $query.Contains('summarize arg_max(TimeGenerated, *) by RunId, RecordId') -and
+            $query.Contains('ActualRecordCount = count()') -and
+            $query.Contains('ActualRecordCount == ExpectedRecordCount')
+        ) 'An allocation query does not require a verified complete run.'
         $calculatesWorkloadCost = (
             $query -match 'sum\((Allocated|Unallocated|Source)(Billed|Effective)?Cost'
         )
@@ -119,6 +148,18 @@ function Test-DashboardContracts {
             Assert-True (
                 $query.Contains('IncludedInWorkloadTotal == true')
             ) 'A workload allocation query can include external context rows.'
+        }
+        if ($calculatesWorkloadCost) {
+            Assert-True (
+                $query.Contains('IncludedInWorkloadTotal == true') -or
+                $isExternalQuery
+            ) 'An allocation total can mix workload and external context.'
+        }
+        if ($query.Contains('let AllocationLastSeen')) {
+            Assert-True (
+                $query.Contains('SourceType == "finops-hub-focus-v1.2-preview"') -and
+                $query.Contains('SourceScope =~ "__RESOURCE_GROUP_ID__"')
+            ) 'Workload allocation freshness can include a non-FOCUS or external run.'
         }
     }
     Assert-True (
@@ -140,6 +181,14 @@ function Test-DashboardContracts {
             $query -match '__[A-Z0-9_]+__'
         ) 'An Azure resource query does not contain a deployment substitution.'
     }
+    Assert-True (
+        -not $dashboardText.Contains('Needs checkpoint instrumentation')
+    ) 'The operations dashboard still contains the checkpoint placeholder.'
+    Assert-True (
+        $dashboardText.Contains('UsageProcessorCheckpointStatus') -and
+        $dashboardText.Contains('checkpointAgeSeconds') -and
+        $dashboardText.Contains('sequenceLag')
+    ) 'The operations dashboard does not query checkpoint telemetry.'
 
     $dashboardModulePath = Join-Path $repositoryRoot 'infra\modules\grafana-dashboard.bicep'
     $dashboardModule = Get-Content -LiteralPath $dashboardModulePath -Raw
@@ -159,6 +208,44 @@ function Test-DashboardContracts {
     Assert-True ($dashboardDefinitions.Count -eq 2) 'Each Grafana dashboard must contain one dashboard definition.'
 
     Write-Host "Validated two Grafana dashboards and $($queries.Count) Azure queries."
+}
+
+function Test-WorkbookContracts {
+    $workbookPath = Join-Path $repositoryRoot 'infra\workbooks\monitoring-workbook.json'
+    $workbookText = Get-Content -LiteralPath $workbookPath -Raw
+    $workbook = $workbookText | ConvertFrom-Json -Depth 100
+    $queries = @(
+        Get-NamedStringValues -Value $workbook -PropertyName 'query' |
+            Where-Object {
+                $_ -match '\b(AIRequestUsage_CL|AICostAllocation_CL|AppTraces)\b'
+            }
+    )
+
+    Assert-True (
+        $workbookText.Contains('UsageProcessorCheckpointStatus') -and
+        $workbookText.Contains('checkpointAgeSeconds')
+    ) 'The investigation workbook does not expose checkpoint telemetry.'
+    foreach ($query in @($queries | Where-Object { $_ -match '\bAICostAllocation_CL\b' })) {
+        Assert-True (
+            $query.Contains("RecordType == 'allocation'") -and
+            $query.Contains("RecordType == 'run-complete'") -and
+            $query.Contains('summarize arg_max(TimeGenerated, *) by RunId, RecordId') -and
+            $query.Contains('ActualRecordCount = count()') -and
+            $query.Contains('ActualRecordCount == ExpectedRecordCount')
+        ) 'A workbook allocation query does not require a verified complete run.'
+        $calculatesAllocationTotal = (
+            $query -match 'sum\((Allocated|Unallocated|Source)(Billed|Effective)?Cost'
+        )
+        if ($calculatesAllocationTotal) {
+            Assert-True (
+                $query.Contains("RecordType == 'run-complete'") -and
+                $query.Contains('ActualRecordCount = count()') -and
+                $query.Contains('ActualRecordCount == ExpectedRecordCount')
+            ) 'A workbook allocation total can include a partial or replayed run.'
+        }
+    }
+
+    Write-Host "Validated the investigation workbook and $($queries.Count) queries."
 }
 
 function Test-TeardownContracts {
@@ -191,12 +278,14 @@ function Test-TeardownContracts {
 }
 
 function Test-BicepBuild {
-    $temporaryOutput = Join-Path $PSScriptRoot '.validation-main.json'
+    $bicep = Resolve-BicepExecutable
+    $mainOutput = Join-Path $PSScriptRoot '.validation-main.json'
+    $finOpsOutput = Join-Path $PSScriptRoot '.validation-finops.json'
     try {
         $diagnostics = @(
-            & az bicep build `
-                --file (Join-Path $repositoryRoot 'infra\main.bicep') `
-                --outfile $temporaryOutput 2>&1
+            & $bicep build `
+                (Join-Path $repositoryRoot 'infra\main.bicep') `
+                --outfile $mainOutput 2>&1
         )
         $exitCode = $LASTEXITCODE
         foreach ($line in $diagnostics) {
@@ -223,14 +312,31 @@ function Test-BicepBuild {
             Assert-True $isAllowed "The Bicep build has a new warning: $warning"
         }
         Assert-True (
-            Test-Path -LiteralPath $temporaryOutput -PathType Leaf
+            Test-Path -LiteralPath $mainOutput -PathType Leaf
         ) 'The Bicep build did not create the compiled template.'
+
+        $finOpsDiagnostics = @(
+            & $bicep build `
+                (Join-Path $repositoryRoot 'infra\modules\finops-hub-wrapper.bicep') `
+                --outfile $finOpsOutput 2>&1
+        )
+        $finOpsExitCode = $LASTEXITCODE
+        foreach ($line in $finOpsDiagnostics) {
+            Write-Host $line
+        }
+        if ($finOpsExitCode -ne 0) {
+            throw "The FinOps wrapper Bicep build failed with exit code $finOpsExitCode."
+        }
+        Assert-True (
+            Test-Path -LiteralPath $finOpsOutput -PathType Leaf
+        ) 'The FinOps wrapper build did not create the compiled template.'
     }
     finally {
-        Remove-Item -LiteralPath $temporaryOutput -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $mainOutput -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $finOpsOutput -Force -ErrorAction SilentlyContinue
     }
 
-    Write-Host 'Validated the Bicep build and warning baseline.'
+    Write-Host 'Validated the main and FinOps wrapper Bicep builds and warning baseline.'
 }
 
 function Test-FunctionPackageContracts {
@@ -262,26 +368,131 @@ function Test-FunctionPackageContracts {
     Assert-True (
         $processorModule.Contains('logAnalyticsWorkspace.properties.customerId')
     ) 'The Function App must use the Log Analytics workspace customer ID.'
+    $requirements = Get-Content -LiteralPath (
+        Join-Path $processorRoot 'requirements.txt'
+    ) -Raw
+    Assert-True (
+        $requirements.Contains('azure-eventhub==5.15.1')
+    ) 'The Function package does not pin the Event Hubs SDK used by the checkpoint monitor.'
+    $functionApp = Get-Content -LiteralPath (
+        Join-Path $processorRoot 'function_app.py'
+    ) -Raw
+    Assert-True (
+        $functionApp.Contains('name="MonitorEventHubCheckpoints"') -and
+        $functionApp.Contains('run_checkpoint_monitor()')
+    ) 'The periodic checkpoint monitor Function is not registered.'
+    $hostConfiguration = Get-Content -LiteralPath (
+        Join-Path $processorRoot 'host.json'
+    ) -Raw | ConvertFrom-Json
+    Assert-True (
+        $hostConfiguration.logging.applicationInsights.samplingSettings.excludedTypes -match '(^|;)Trace($|;)'
+    ) 'Checkpoint AppTraces must not be sampled.'
 
     Write-Host 'Validated Function package contracts and allocation settings.'
+}
+
+function Test-CiWorkflowContracts {
+    $workflowPath = Join-Path $repositoryRoot '.github\workflows\ci.yml'
+    Assert-True (
+        Test-Path -LiteralPath $workflowPath -PathType Leaf
+    ) 'The CI workflow is missing.'
+
+    $workflow = Get-Content -LiteralPath $workflowPath -Raw
+    Assert-True (
+        $workflow -notmatch '(?m)^\s*pull_request_target\s*:'
+    ) 'The CI workflow must not use pull_request_target.'
+    Assert-True (
+        $workflow -match '(?m)^permissions:\r?\n\s+contents:\s+read\s*$'
+    ) 'The CI workflow must grant only read access to repository contents.'
+    Assert-True (
+        $workflow.Contains('persist-credentials: false')
+    ) 'The CI checkout must not persist the GitHub token.'
+    Assert-True (
+        $workflow -notmatch 'azure/login|AZURE_CREDENTIALS|id-token:\s+write'
+    ) 'The build-only CI workflow must not configure Azure credentials.'
+    Assert-True (
+        $workflow.Contains('python-version: "3.12"')
+    ) 'The CI workflow must run Python 3.12.'
+    Assert-True (
+        $workflow.Contains('node-version: "24"')
+    ) 'The CI workflow must run Node.js 24.'
+    Assert-True (
+        $workflow.Contains('https://packagefeedproxy.microsoft.io/pypi/simple')
+    ) 'The CI workflow must use the Microsoft Python package proxy.'
+    Assert-True (
+        $workflow.Contains('https://packagefeedproxy.microsoft.io/npm/')
+    ) 'The CI workflow must use the Microsoft npm package proxy.'
+    Assert-True (
+        $workflow.Contains('.\scripts\test-token-cost-attribution.ps1')
+    ) 'The CI workflow does not run the release acceptance script.'
+    Assert-True (
+        $workflow.Contains('npm.cmd audit --audit-level=high --prefix .\src\web')
+    ) 'The CI workflow must fail on high or critical npm audit findings.'
+    Assert-True (
+        -not $workflow.Contains('postdeploy:auth-acceptance')
+    ) 'The offline CI workflow must not run the postdeployment authentication harness.'
+
+    $actionReferences = @(
+        [regex]::Matches($workflow, '(?m)^\s*uses:\s+[^@\s]+@([^\s#]+)') |
+            ForEach-Object { $_.Groups[1].Value }
+    )
+    Assert-True ($actionReferences.Count -gt 0) 'The CI workflow uses no actions.'
+    foreach ($reference in $actionReferences) {
+        Assert-True (
+            $reference -match '^[0-9a-f]{40}$'
+        ) "The CI workflow action reference '$reference' is not a full commit SHA."
+    }
+
+    Write-Host 'Validated the least-privilege CI workflow and pinned actions.'
 }
 
 Push-Location $repositoryRoot
 try {
     & (Join-Path $PSScriptRoot 'verify-finops-release.ps1')
     & (Join-Path $PSScriptRoot 'test-apim-usage-policies.ps1')
+    Invoke-CheckedNative `
+        -Command 'pwsh' `
+        -Arguments @(
+            '-NoProfile'
+            '-File'
+            (Join-Path $PSScriptRoot 'test-lifecycle-hooks.ps1')
+        ) `
+        -Description 'lifecycle hook contract tests'
+    Invoke-CheckedNative `
+        -Command 'pwsh' `
+        -Arguments @(
+            '-NoProfile'
+            '-File'
+            (Join-Path $PSScriptRoot 'test-hmac-bootstrap.ps1')
+        ) `
+        -Description 'HMAC and lifecycle Bicep tests'
     Test-DashboardContracts
+    Test-WorkbookContracts
     Test-TeardownContracts
     Test-BicepBuild
     Test-FunctionPackageContracts
+    Test-CiWorkflowContracts
     Invoke-CheckedNative `
         -Command 'python' `
         -Arguments @('-m', 'unittest', 'discover', '-s', '.\src\usage-processor\tests') `
         -Description 'Python usage processor tests'
     Invoke-CheckedNative `
         -Command 'npm.cmd' `
-        -Arguments @('run', 'test:usage', '--prefix', '.\src\web') `
-        -Description 'Node usage normalization tests'
+        -Arguments @('run', 'build', '--prefix', '.\src\web') `
+        -Description 'Node web build'
+    foreach ($test in @(
+        'test:auth-logging'
+        'test:auth-validation'
+        'test:easyauth-harness-guards'
+        'test:dependency-security'
+        'test:usage'
+        'test:weather'
+    )) {
+        Invoke-CheckedNative `
+            -Command 'npm.cmd' `
+            -Arguments @('run', $test, '--prefix', '.\src\web') `
+            -Description "Node $test tests"
+    }
 }
 finally {
     Pop-Location

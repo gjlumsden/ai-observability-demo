@@ -79,6 +79,8 @@ Claude CCU meters. These records use:
 The subscription value can include other workloads. It is excluded from every
 demo total. The processor never uses it as an allocation fallback, weight, or
 denominator.
+External context reporting uses the latest verified rolling seven-day snapshot.
+It is not a cumulative sum across historical overlapping query windows.
 
 ## Metric and structured-event split
 
@@ -188,6 +190,7 @@ Cost Management data immediate.
 | Allocation Function | Allocated and unallocated cost rows | `AICostAllocation_CL` | Cost reporting |
 | Cost Management query | Subscription Claude CCU total | Excluded allocation rows | External operator context |
 | Foundry | Model metrics and optional agent traces | Azure Monitor | Model-native cross-check |
+| Usage processor | Per-partition checkpoint status and lag | `AppTraces` (`UsageProcessorCheckpointStatus`) | Pipeline health and stale/missing alerts |
 
 ## Reporting surfaces
 
@@ -217,9 +220,9 @@ The Azure Monitor dashboard resource is `Attribution-Pipeline-Ops`. The
 displayed title is **Attribution Pipeline Operations**. It contains no
 individual identity.
 
-Use it for Event Hubs ingress, Capture status, processor lag, allocation state,
-quarantine growth, DCR signals, FOCUS freshness, export failures, scope
-rejections, replay handling, and reconciliation residuals.
+Use it for Event Hubs ingress, Capture status, processor lag, checkpoint status
+and age, allocation state, quarantine growth, DCR signals, FOCUS freshness, export
+failures, scope rejections, replay handling, and reconciliation residuals.
 
 ### AI Usage and Cost Investigation Workbook
 

@@ -2,7 +2,11 @@ from datetime import datetime, timedelta, timezone
 import logging
 import uuid
 
-from .allocation import allocate_cost_bucket, unavailable_claude_row
+from .allocation import (
+    allocate_cost_bucket,
+    build_run_complete_row,
+    unavailable_claude_row,
+)
 from .cost_context import build_external_rows, external_result_etag
 from .errors import FocusContractError, ScopeViolation
 from .focus import (
@@ -15,6 +19,8 @@ from .focus import (
 
 LOGGER = logging.getLogger("usage_processor.allocation")
 INGESTION_BATCH_SIZE = 500
+EXTERNAL_QUERY_SOURCE_TYPE = "cost-management-query"
+EXTERNAL_QUERY_SOURCE_SCOPE = "subscription"
 
 
 def process_focus_manifests(
@@ -38,23 +44,22 @@ def process_focus_manifests(
         if claim.outcome == "complete":
             skipped += 1
             continue
-        if claim.status == "ingesting":
-            skipped += 1
-            LOGGER.warning(
-                "Skipped an ambiguously ingested cost dataset; the immutable run may already exist."
-            )
-            continue
-        run_id = str(
-            uuid.uuid5(
-                uuid.NAMESPACE_URL,
-                f"finops-focus|{manifest.path}|{manifest.etag}",
-            )
+        attempt = int(claim.properties.get("Attempt") or 0) + 1
+        run_id = _run_id(
+            "finops-focus",
+            manifest.path,
+            manifest.etag,
+            attempt,
         )
         try:
             year, month = validate_manifest_scope(
                 manifest.path, settings.workload_resource_group_id
             )
-            claim = state_store.transition(claim, "reading", {"RunId": run_id})
+            claim = state_store.transition(
+                claim,
+                "reading",
+                {"RunId": run_id, "Attempt": attempt},
+            )
             rows = source.read_rows(manifest)
             validate_focus_rows(rows, settings.workload_resource_group_id)
         except (FocusContractError, ScopeViolation) as error:
@@ -78,9 +83,8 @@ def process_focus_manifests(
                 weights = []
                 no_usage_status = "unallocated-unmatched-meter"
             elif (
-                bucket.provider == "OpenAI"
-                and bucket.resource_id
-                and bucket.resource_id.casefold()
+                not bucket.resource_id
+                or bucket.resource_id.casefold()
                 not in {
                     item.casefold()
                     for item in settings.workload_model_resource_ids
@@ -130,6 +134,16 @@ def process_focus_manifests(
             settings.dcr_allocation_stream,
             allocation_rows,
         )
+        completion = build_run_complete_row(
+            run_id=run_id,
+            source_type="finops-hub-focus-v1.2-preview",
+            source_scope=settings.workload_resource_group_id,
+            source_path=manifest.path,
+            source_etag=manifest.etag,
+            expected_record_count=len(allocation_rows),
+        )
+        validator.validate_allocation(completion)
+        ingestion_writer.upload(settings.dcr_allocation_stream, [completion])
         state_store.transition(claim, "allocated")
         processed += 1
 
@@ -153,12 +167,12 @@ def process_external_claude_context(
     validator,
 ):
     costs = cost_query.query_claude_ccu(start, end)
-    source_etag = external_result_etag(costs)
-    source_path = (
-        f"/subscriptions/{settings.subscription_id}"
-        "/providers/Microsoft.CostManagement/query"
-        f"?api-version=2026-06-01&from={start.date()}&to={end.date()}"
+    source_etag = external_result_etag(
+        costs,
+        query_start=start,
+        query_end=end,
     )
+    source_path = external_cost_source_path(settings.subscription_id)
     claim = state_store.claim_cost(
         source_path,
         source_etag,
@@ -166,13 +180,24 @@ def process_external_claude_context(
     )
     if claim.outcome == "complete":
         return {"processed": 0, "rows": 0, "duplicate": True}
-    if claim.status == "ingesting":
-        LOGGER.warning(
-            "Skipped ambiguously ingested Claude context; the immutable run may already exist."
-        )
-        return {"processed": 0, "rows": 0, "duplicate": True}
-
-    rows = build_external_rows(costs, source_path, source_etag)
+    attempt = int(claim.properties.get("Attempt") or 0) + 1
+    run_id = _run_id(
+        EXTERNAL_QUERY_SOURCE_TYPE,
+        source_path,
+        source_etag,
+        attempt,
+    )
+    claim = state_store.transition(
+        claim,
+        "reading",
+        {"RunId": run_id, "Attempt": attempt},
+    )
+    rows = build_external_rows(
+        costs,
+        source_path,
+        source_etag,
+        run_id=run_id,
+    )
     for row in rows:
         validator.validate_allocation(row)
     claim = state_store.transition(
@@ -185,6 +210,16 @@ def process_external_claude_context(
         settings.dcr_allocation_stream,
         rows,
     )
+    completion = build_run_complete_row(
+        run_id=run_id,
+        source_type=EXTERNAL_QUERY_SOURCE_TYPE,
+        source_scope=EXTERNAL_QUERY_SOURCE_SCOPE,
+        source_path=source_path,
+        source_etag=source_etag,
+        expected_record_count=len(rows),
+    )
+    validator.validate_allocation(completion)
+    ingestion_writer.upload(settings.dcr_allocation_stream, [completion])
     state_store.transition(claim, "allocated")
     LOGGER.info("Claude external context processed: rows=%d", len(rows))
     return {"processed": 1, "rows": len(rows), "duplicate": False}
@@ -198,6 +233,14 @@ def default_external_query_range(now=None):
     return end - timedelta(days=7), end
 
 
+def external_cost_source_path(subscription_id):
+    return (
+        f"/subscriptions/{subscription_id}"
+        "/providers/Microsoft.CostManagement/query"
+        "?api-version=2026-06-01&view=claude-ccu-daily-snapshot"
+    )
+
+
 def _month_range(year, month):
     start = datetime(year, month, 1, tzinfo=timezone.utc)
     if month == 12:
@@ -208,3 +251,12 @@ def _month_range(year, month):
 def _upload_in_batches(writer, stream_name, rows):
     for start in range(0, len(rows), INGESTION_BATCH_SIZE):
         writer.upload(stream_name, rows[start : start + INGESTION_BATCH_SIZE])
+
+
+def _run_id(source_type, source_path, source_etag, attempt):
+    return str(
+        uuid.uuid5(
+            uuid.NAMESPACE_URL,
+            f"{source_type}|{source_path}|{source_etag}|attempt={attempt}",
+        )
+    )

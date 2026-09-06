@@ -21,6 +21,17 @@ def _split_resource_ids(value):
     )
 
 
+def _positive_int(value, name, default):
+    text = str(value if value is not None else default).strip()
+    try:
+        result = int(text)
+    except ValueError as error:
+        raise ConfigurationError(f"{name} must be a positive integer.") from error
+    if result <= 0:
+        raise ConfigurationError(f"{name} must be a positive integer.")
+    return result
+
+
 @dataclass(frozen=True)
 class Settings:
     storage_blob_endpoint: str
@@ -30,6 +41,9 @@ class Settings:
     capture_container_name: str
     event_hub_namespace: str
     event_hub_name: str
+    event_hub_consumer_group: str
+    checkpoint_stale_seconds: int
+    checkpoint_idle_seconds: int
     dcr_endpoint: str
     dcr_immutable_id: str
     dcr_usage_stream: str
@@ -58,6 +72,20 @@ class Settings:
             capture_container_name=values.get("USAGE_CAPTURE_CONTAINER", ""),
             event_hub_namespace=values.get("AIUsageEventHub__fullyQualifiedNamespace", ""),
             event_hub_name=values.get("AI_USAGE_EVENT_HUB_NAME", ""),
+            event_hub_consumer_group=values.get(
+                "AI_USAGE_CONSUMER_GROUP",
+                "",
+            ),
+            checkpoint_stale_seconds=_positive_int(
+                values.get("CHECKPOINT_STALE_SECONDS"),
+                "CHECKPOINT_STALE_SECONDS",
+                900,
+            ),
+            checkpoint_idle_seconds=_positive_int(
+                values.get("CHECKPOINT_IDLE_SECONDS"),
+                "CHECKPOINT_IDLE_SECONDS",
+                900,
+            ),
             dcr_endpoint=values.get("DCR_ENDPOINT", ""),
             dcr_immutable_id=values.get("DCR_IMMUTABLE_ID", ""),
             dcr_usage_stream=values.get("DCR_USAGE_STREAM", ""),
@@ -87,6 +115,7 @@ class Settings:
             "DCR_IMMUTABLE_ID": self.dcr_immutable_id,
             "DCR_USAGE_STREAM": self.dcr_usage_stream,
             "WORKLOAD_RESOURCE_GROUP_ID": self.workload_resource_group_id,
+            "WORKLOAD_MODEL_RESOURCE_IDS": self.workload_model_resource_ids,
         }
         self._require(required)
 
@@ -114,6 +143,18 @@ class Settings:
                 "DCR_ENDPOINT": self.dcr_endpoint,
                 "DCR_IMMUTABLE_ID": self.dcr_immutable_id,
                 "DCR_ALLOCATION_STREAM": self.dcr_allocation_stream,
+            }
+        )
+
+    def require_checkpoint_monitor(self):
+        self._require(
+            {
+                "USAGE_STORAGE_BLOB_ENDPOINT": self.storage_blob_endpoint,
+                "AIUsageEventHub__fullyQualifiedNamespace": (
+                    self.event_hub_namespace
+                ),
+                "AI_USAGE_EVENT_HUB_NAME": self.event_hub_name,
+                "AI_USAGE_CONSUMER_GROUP": self.event_hub_consumer_group,
             }
         )
 

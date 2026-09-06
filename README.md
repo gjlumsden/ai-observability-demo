@@ -116,6 +116,10 @@ Use the [cost governance walkthrough](docs/cost-governance-demo.md) for the full
 The [documentation index](docs/README.md) links all user, operator, presenter,
 component, and design documents.
 
+For provenance and features, read the
+[composition and upstreams](docs/composition-and-upstreams.md) document and the
+[feature catalog](docs/features.md).
+
 ## Data and security boundary
 
 - Use approved public or synthetic input.
@@ -131,11 +135,19 @@ component, and design documents.
 ## Acknowledgements
 
 [Lester March's Core AI Platform Demo](https://github.com/lestermarch/core-ai-platform-demo)
-laid the groundwork for this project. This implementation builds on that foundation
-with expanded AI gateway, observability, FinOps, guardrail, and presenter scenarios.
+provided early inspiration for this project. It is a community repository. It is
+not an authoritative source and not a Microsoft reference implementation. This
+implementation is built around Microsoft original repositories and platform
+features for the AI gateway, observability, FinOps, guardrail, and presenter
+scenarios. See [NOTICE.md](NOTICE.md) and
+[docs/composition-and-upstreams.md](docs/composition-and-upstreams.md) for
+provenance and attribution.
 
 The Claude deployment follows the Microsoft-maintained
 [Azure-Samples/claude](https://github.com/Azure-Samples/claude) Bicep pattern.
+
+See the [composition and upstreams](docs/composition-and-upstreams.md) document for
+the complete provenance matrix and rationale.
 
 ## License
 

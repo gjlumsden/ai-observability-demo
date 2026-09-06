@@ -109,7 +109,80 @@ resource webApp 'Microsoft.Web/sites@2024-04-01' = {
           name: 'WEBSITES_PORT'
           value: '3000'
         }
+        {
+          // Required for MISE-backed platform authentication. See authsettingsV2 below;
+          // this flag turns on the MISE token-validation engine inside App Service's auth layer.
+          name: 'WEBSITE_AAD_ENABLE_MISE'
+          value: 'true'
+        }
       ]
+    }
+  }
+}
+
+@description('Azure App Service Authentication ("Easy Auth"), the platform-enforced, MISE-backed replacement for in-app MSAL/session sign-in.')
+resource webAppAuthSettings 'Microsoft.Web/sites/config@2024-04-01' = {
+  parent: webApp
+  name: 'authsettingsV2'
+  properties: {
+    platform: {
+      enabled: true
+    }
+    globalValidation: {
+      // Deliberately NOT "requireAuthentication: true" for the whole app: this app has a public
+      // home page, a public /healthz probe, and a machine-to-machine /api/weather/forecast route
+      // protected by its own x-mcp-key check. Microsoft's own guidance for that shape is
+      // "Allow unauthenticated requests" so app code makes the per-route decision (see
+      // src/web/middleware/auth.js requireAuth), while Easy Auth still fully validates signature,
+      // issuer, audience, and lifetime for any request that IS authenticated, forwarding the
+      // verified identity via X-MS-CLIENT-PRINCIPAL-*/X-MS-TOKEN-AAD-* headers.
+      // Reference: https://learn.microsoft.com/azure/app-service/overview-authentication-authorization#how-it-works
+      requireAuthentication: false
+      unauthenticatedClientAction: 'AllowAnonymous'
+    }
+    identityProviders: {
+      azureActiveDirectory: {
+        // Disabled until postprovision creates the Entra app registration and populates the real
+        // client ID/secret; a placeholder client ID cannot be enabled safely. The lifecycle/hooks
+        // owner finalizes this with `az webapp auth update` once entraClientId is known.
+        enabled: !empty(entraClientId)
+        registration: {
+          clientId: entraClientId
+          clientSecretSettingName: 'MICROSOFT_PROVIDER_AUTHENTICATION_SECRET'
+          openIdIssuer: '${environment().authentication.loginEndpoint}${entraTenantId}/v2.0'
+        }
+        login: {
+          // Requests the same delegated "access_as_user" scope the app previously acquired via
+          // MSAL, so the resulting AAD access token keeps working as the APIM Bearer token.
+          loginParameters: [
+            'scope=openid profile email offline_access api://${entraClientId}/access_as_user'
+          ]
+        }
+        validation: {
+          // Two distinct, both-required constraints (do not conflate them):
+          // - allowedAudiences restricts the token's `aud` claim. Per Microsoft's v2 token
+          //   claims reference, `aud` is always the API's client ID (GUID); the App ID URI
+          //   form is also accepted for compatibility with the access_as_user scope request.
+          //   Mirrors lifecycle's hook-side audience list -- both values, not URI-only.
+          // - defaultAuthorizationPolicy.allowedApplications restricts the token's
+          //   `azp`/`appid` claim: which client application is trusted to have authenticated
+          //   the caller, independent of audience.
+          allowedAudiences: [
+            entraClientId
+            'api://${entraClientId}'
+          ]
+          defaultAuthorizationPolicy: {
+            allowedApplications: [
+              entraClientId
+            ]
+          }
+        }
+      }
+    }
+    login: {
+      tokenStore: {
+        enabled: true
+      }
     }
   }
 }

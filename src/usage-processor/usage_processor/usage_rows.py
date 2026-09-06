@@ -45,7 +45,11 @@ USAGE_COLUMNS = {
 }
 
 
-def enforce_usage_scope(event, workload_resource_group_id):
+def enforce_usage_scope(
+    event,
+    workload_resource_group_id,
+    workload_model_resource_ids,
+):
     expected_group = canonical_resource_id(workload_resource_group_id)
     event_group = canonical_resource_id(event.get("resourceGroupId"))
     model_resource = canonical_resource_id(event.get("modelResourceId"))
@@ -54,6 +58,11 @@ def enforce_usage_scope(event, workload_resource_group_id):
         raise ScopeViolation("usage-resource-group-mismatch")
     if not model_resource.startswith(expected_prefix):
         raise ScopeViolation("usage-model-resource-mismatch")
+    allowed = {
+        canonical_resource_id(item) for item in workload_model_resource_ids
+    }
+    if model_resource not in allowed:
+        raise ScopeViolation("usage-model-resource-not-allowlisted")
 
 
 def build_usage_row(event, usage, estimate, evidence, settings):

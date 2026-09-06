@@ -52,6 +52,7 @@
 {% endblock %}
 
 {% block pageScripts %}
+<script src="/easy-auth-refresh.js"></script>
 <script nonce="{{ cspNonce }}">
   const form = document.getElementById('weather-form');
   const promptInput = document.getElementById('prompt');
@@ -81,11 +82,18 @@
     resultPanel.hidden = false;
     result.textContent = 'Running the agent and weather tool...';
 
-    const response = await fetch(form.action, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt: promptInput.value })
-    });
+    let response;
+    try {
+      response = await fetchWithTokenRefresh(form.action, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: promptInput.value })
+      });
+    } catch (err) {
+      resultPanel.hidden = true;
+      showError(err.message || 'The weather agent could not complete the request. Please try again.');
+      return;
+    }
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) {
       resultPanel.hidden = true;

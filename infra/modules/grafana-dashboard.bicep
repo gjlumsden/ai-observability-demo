@@ -25,6 +25,7 @@ var apimResourceId = resourceId(
 )
 var eventHubNamespaceName = take('aiobs-usage-eh-${cleanSuffix}', 50)
 var eventHubNamespaceId = resourceId('Microsoft.EventHub/namespaces', eventHubNamespaceName)
+var eventHubConsumerGroupName = 'processor'
 var functionAppName = take('aiobs-usage-func-${cleanSuffix}', 60)
 var usageStorageAccountName = take('aiobsusage${cleanSuffix}', 24)
 var finOpsResourceGroupName = take('${resourceGroup().name}-finops', 90)
@@ -98,8 +99,13 @@ var dashboardBundleWithEventHubId = replace(
   '__EVENT_HUB_NAMESPACE_RESOURCE_ID__',
   eventHubNamespaceId
 )
-var dashboardBundleWithFunction = replace(
+var dashboardBundleWithConsumerGroup = replace(
   dashboardBundleWithEventHubId,
+  '__EVENT_HUB_CONSUMER_GROUP__',
+  eventHubConsumerGroupName
+)
+var dashboardBundleWithFunction = replace(
+  dashboardBundleWithConsumerGroup,
   '__FUNCTION_APP_NAME__',
   functionAppName
 )

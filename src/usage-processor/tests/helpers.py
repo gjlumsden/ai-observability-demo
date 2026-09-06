@@ -92,6 +92,9 @@ def valid_allocation(**overrides):
         "UsageSnapshotId": "a" * 64,
         "SourcePath": "Costs/2026/08/manifest.json",
         "SourceETag": "etag-1",
+        "RecordId": "b" * 64,
+        "RecordType": "allocation",
+        "ExpectedRecordCount": None,
     }
     row.update(overrides)
     return row

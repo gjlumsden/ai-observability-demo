@@ -11,7 +11,7 @@ const {
   protectedCodeDirectSample
 } = require('../lib/scenario-prompts');
 const { trackGuardrailDecision } = require('../lib/telemetry');
-const { requireAuth } = require('../middleware/auth');
+const { requireAuth, requireFreshProviderToken } = require('../middleware/auth');
 
 const router = express.Router();
 const MAX_PROMPT_LENGTH = 6000;
@@ -73,7 +73,7 @@ router.get('/scientific-code-explainer', requireAuth, (req, res) => {
   });
 });
 
-router.post('/scientific-code-explainer/explain', requireAuth, async (req, res, next) => {
+router.post('/scientific-code-explainer/explain', requireAuth, requireFreshProviderToken, async (req, res, next) => {
   const correlationId = crypto.randomUUID();
   let sampleKind = 'normal';
   try {
@@ -95,7 +95,7 @@ router.post('/scientific-code-explainer/explain', requireAuth, async (req, res, 
     const response = await callApim({
       path: '/models/openai/responses?api-version=2025-04-01-preview',
       subscriptionKey: process.env.APIM_PRESENTER_KEY,
-      bearerToken: req.session.accessToken,
+      bearerToken: req.user.accessToken,
       includeMetadata: true,
       extraHeaders: {
         'x-correlation-id': correlationId
@@ -142,7 +142,7 @@ router.post('/scientific-code-explainer/explain', requireAuth, async (req, res, 
         try {
           protectedMaterialCheck = await runProtectedMaterialCheck({
             code: generatedCode,
-            bearerToken: req.session.accessToken,
+            bearerToken: req.user.accessToken,
             correlationId
           });
           trackGuardrailDecision({
@@ -211,7 +211,7 @@ router.post('/scientific-code-explainer/explain', requireAuth, async (req, res, 
   }
 });
 
-router.post('/scientific-code-explainer/check-protected-code', requireAuth, async (req, res, next) => {
+router.post('/scientific-code-explainer/check-protected-code', requireAuth, requireFreshProviderToken, async (req, res, next) => {
   const correlationId = crypto.randomUUID();
   try {
     const code = (req.body.code || '').trim();
@@ -231,7 +231,7 @@ router.post('/scientific-code-explainer/check-protected-code', requireAuth, asyn
 
     const protectedMaterialCheck = await runProtectedMaterialCheck({
       code,
-      bearerToken: req.session.accessToken,
+      bearerToken: req.user.accessToken,
       correlationId
     });
     trackGuardrailDecision({

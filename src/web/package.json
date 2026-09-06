@@ -10,20 +10,22 @@
     "start": "node app.js",
     "dev": "nodemon app.js",
     "build": "node scripts/copy-govuk-assets.js",
+    "test:token-refresh": "node scripts/test-token-refresh.js",
     "test:auth-logging": "node scripts/test-auth-logging.js",
+    "test:auth-validation": "node scripts/test-auth-validation.js && node scripts/test-token-refresh.js",
+    "test:easyauth-harness-guards": "node scripts/test-easyauth-harness-guards.js",
+    "test:dependency-security": "node scripts/test-dependency-security.js",
     "test:weather": "node scripts/test-weather-api.js",
     "test:usage": "node scripts/test-usage.js",
+    "postdeploy:auth-acceptance": "node scripts/test-easyauth-token-acceptance.js",
     "postinstall": "node scripts/copy-govuk-assets.js"
   },
   "dependencies": {
     "@azure/monitor-opentelemetry": "1.19.0",
-    "@azure/msal-node": "^5.5.0",
     "@opentelemetry/api": "1.9.1",
     "@opentelemetry/api-logs": "0.220.0",
-    "cookie-parser": "^1.4.7",
     "dotenv": "^17.2.3",
     "express": "^5.2.1",
-    "express-session": "^1.18.2",
     "govuk-frontend": "^5.12.0",
     "helmet": "^8.1.0",
     "markdown-it": "^14.3.0",
@@ -33,5 +35,8 @@
   },
   "devDependencies": {
     "nodemon": "^3.1.11"
+  },
+  "overrides": {
+    "qs": "^6.16.0"
   }
 }

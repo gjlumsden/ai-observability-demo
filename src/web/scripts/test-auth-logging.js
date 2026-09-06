@@ -1,16 +1,8 @@
-process.env.NODE_ENV = 'production';
-process.env.SESSION_SECRET = 'test-session-secret-that-is-long-enough-for-this-check';
-process.env.ENTRA_CLIENT_ID = '00000000-0000-0000-0000-000000000001';
-process.env.ENTRA_TENANT_ID = '00000000-0000-0000-0000-000000000002';
-process.env.ENTRA_CLIENT_SECRET = 'test-client-secret';
+// Confirms request access logs never leak the Easy Auth identity headers or the forwarded
+// downstream access token (auth/body logging privacy requirement).
+const assert = require('node:assert/strict');
 
-const msal = require('@azure/msal-node');
-msal.ConfidentialClientApplication.prototype.getAuthCodeUrl = async ({ state }) =>
-  `https://login.example.invalid/authorize?state=${encodeURIComponent(state)}`;
-msal.ConfidentialClientApplication.prototype.acquireTokenByCode = async () => ({
-  account: { username: 'demo@example.invalid' },
-  accessToken: 'test-access-token'
-});
+process.env.NODE_ENV = 'production';
 const app = require('../app');
 
 const originalWrite = process.stdout.write.bind(process.stdout);
@@ -21,47 +13,28 @@ process.stdout.write = (chunk, encoding, callback) => {
 };
 
 const server = app.listen(0, '127.0.0.1', async () => {
-  const code = 'sensitive-authorization-code';
+  const secretAccessToken = 'sensitive-downstream-access-token';
+  const principalId = 'sensitive-principal-id';
 
   try {
-    const signInResponse = await fetch(`http://127.0.0.1:${server.address().port}/auth/signin`, {
+    const { port } = server.address();
+    const response = await fetch(`http://127.0.0.1:${port}/model-comparison`, {
       headers: {
-        'x-forwarded-proto': 'https'
+        'x-forwarded-proto': 'https',
+        'x-ms-client-principal-id': principalId,
+        'x-ms-client-principal-name': 'demo@example.invalid',
+        'x-ms-token-aad-access-token': secretAccessToken
       },
       redirect: 'manual'
     });
-    const stateCookie = signInResponse.headers.getSetCookie()
-      .find((value) => value.startsWith('ai-observability-demo.auth-state='));
-    if (!stateCookie || !stateCookie.includes('SameSite=None') || !stateCookie.includes('Secure')) {
-      throw new Error('The short-lived authentication state cookie is not cross-site secure.');
-    }
-    const cookieHeader = stateCookie.split(';', 1)[0];
-    const returnedState = new URL(signInResponse.headers.get('location')).searchParams.get('state');
-
-    const response = await fetch(`http://127.0.0.1:${server.address().port}/auth/callback`, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/x-www-form-urlencoded',
-        cookie: cookieHeader,
-        'x-forwarded-proto': 'https'
-      },
-      body: new URLSearchParams({ code, state: returnedState }),
-      redirect: 'manual'
-    });
-
     await response.text();
-    await new Promise((resolve) => setTimeout(resolve, 50));
 
-    const sessionCookie = response.headers.getSetCookie()
-      .find((value) => value.startsWith('ai-observability-demo.sid='));
-    if (!sessionCookie || !sessionCookie.includes('SameSite=Lax') || !sessionCookie.includes('Secure')) {
-      throw new Error('The authenticated session cookie does not enforce SameSite=Lax.');
-    }
-    if (output.includes(code) || output.includes(returnedState)) {
+    assert.equal(response.status, 200, 'Expected the Easy Auth principal headers to grant access.');
+    if (output.includes(secretAccessToken) || output.includes(principalId)) {
       throw new Error('Authentication artifacts appeared in access logs.');
     }
-    if (!output.includes('POST /auth/callback')) {
-      throw new Error('The callback path was not present in access logs.');
+    if (!output.includes('GET /model-comparison')) {
+      throw new Error('The requested path was not present in access logs.');
     }
 
     originalWrite('Authentication logging test passed.\n');

@@ -4,7 +4,7 @@ const { callApim } = require('../lib/apim');
 const { normalizeWeatherAgentResponse } = require('../lib/weather-agent');
 const { renderMarkdown } = require('../lib/markdown');
 const { weatherAgentPrompts } = require('../lib/scenario-prompts');
-const { requireAuth } = require('../middleware/auth');
+const { requireAuth, requireFreshProviderToken } = require('../middleware/auth');
 
 const router = express.Router();
 const MAX_PROMPT_LENGTH = 2000;
@@ -16,7 +16,7 @@ router.get('/weather-agent', requireAuth, (req, res) => {
   });
 });
 
-router.post('/weather-agent/run', requireAuth, async (req, res, next) => {
+router.post('/weather-agent/run', requireAuth, requireFreshProviderToken, async (req, res, next) => {
   try {
     const prompt = (req.body.prompt || '').trim();
     if (!prompt) {
@@ -33,7 +33,7 @@ router.post('/weather-agent/run', requireAuth, async (req, res, next) => {
     const response = await callApim({
       path: '/agents/weather/responses',
       subscriptionKey: process.env.APIM_PRESENTER_KEY,
-      bearerToken: req.session.accessToken,
+      bearerToken: req.user.accessToken,
       includeMetadata: true,
       extraHeaders: {
         'x-correlation-id': correlationId

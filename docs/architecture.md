@@ -68,9 +68,12 @@ secret. It validates scope, deduplicates usage, quarantines malformed records,
 processes completed FOCUS datasets by path and ETag, and allocates cost.
 
 **Microsoft FinOps hubs and Cost Management** provide delayed resource-group
-FOCUS actuals. A versioned rate card provides request estimates. FOCUS
-`BilledCost` and `EffectiveCost` are allocated with the request estimates as
-weights. Unmatched resource-group cost stays unallocated.
+FOCUS actuals. A versioned rate card provides request estimates. An exact official
+`meterName`, `skuName`, or `armSkuName` identifies one model and token category. The
+processor weights FOCUS `BilledCost` and `EffectiveCost` only by that category's
+priced usage from the exact charged resource, the exact request model, and the
+matching rate-card version. Unknown meters, missing mappings, resource mismatches,
+and missing eligible usage stay unallocated.
 
 Claude CCU actual cost can be absent from a resource-group FOCUS export. The
 processor records this state as unavailable with null actual-cost fields. It

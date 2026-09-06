@@ -85,6 +85,7 @@
 {% endblock %}
 
 {% block pageScripts %}
+<script src="/easy-auth-refresh.js"></script>
 <script nonce="{{ cspNonce }}">
   const form = document.getElementById('explainer-form');
   const promptInput = document.getElementById('prompt');
@@ -224,14 +225,21 @@
     resultContainer.textContent = 'Running GPT-5.4 through the AI Gateway...';
     correlationId.textContent = '';
 
-    const response = await fetch(form.action, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        prompt: promptInput.value,
-        sampleKind: selectedSampleKind
-      })
-    });
+    let response;
+    try {
+      response = await fetchWithTokenRefresh(form.action, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: promptInput.value,
+          sampleKind: selectedSampleKind
+        })
+      });
+    } catch (err) {
+      resultPanel.hidden = true;
+      showError(err.message || 'The code could not be explained. Please try again.');
+      return;
+    }
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) {
       resultPanel.hidden = true;
@@ -264,11 +272,21 @@
     directResult.textContent = 'Running the direct protected-code check...';
     directCorrelationId.textContent = '';
 
-    const response = await fetch(directForm.action, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ code: directCode.value })
-    });
+    let response;
+    try {
+      response = await fetchWithTokenRefresh(directForm.action, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: directCode.value })
+      });
+    } catch (err) {
+      directResult.textContent = '';
+      const error = document.createElement('p');
+      error.className = 'govuk-error-message';
+      error.textContent = err.message || 'The direct check could not be completed. Please try again.';
+      directResult.appendChild(error);
+      return;
+    }
     const payload = await response.json().catch(() => ({}));
     directResult.textContent = '';
     if (!response.ok) {
