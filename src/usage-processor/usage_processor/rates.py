@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal
+from functools import lru_cache
 import json
 from math import isfinite
 from pathlib import Path
@@ -32,6 +33,14 @@ class Estimate:
     amount: float | None
     currency: str | None
     version: str | None
+
+
+@dataclass(frozen=True)
+class AzureMeterRate:
+    model: str
+    token_type: str
+    list_price: Decimal
+    version: str
 
 
 class RateCard:
@@ -114,6 +123,43 @@ class RateCard:
             if valid_from <= instant and (valid_to is None or instant < valid_to):
                 candidates.append((valid_from, rate))
         return max(candidates, key=lambda item: item[0])[1] if candidates else None
+
+
+@lru_cache(maxsize=1)
+def load_azure_meter_map(rate_card_path=DEFAULT_RATE_CARD_PATH):
+    card = RateCard.load(rate_card_path=rate_card_path)
+    mappings = {}
+    for rate in card.rates:
+        if rate["provider"] != "OpenAI":
+            continue
+        value = AzureMeterRate(
+            model=rate["model"],
+            token_type=rate["tokenType"],
+            list_price=Decimal(str(rate["listPrice"])),
+            version=rate["version"],
+        )
+        for field in ("meterName", "skuName", "armSkuName"):
+            key = rate[field].strip().casefold()
+            existing = mappings.get(key)
+            if existing is not None and existing != value:
+                raise ValueError("An Azure meter maps to more than one rate.")
+            mappings[key] = value
+    return mappings
+
+
+@lru_cache(maxsize=1)
+def load_provider_model_versions(rate_card_path=DEFAULT_RATE_CARD_PATH):
+    card = RateCard.load(rate_card_path=rate_card_path)
+    values = {}
+    for provider in {rate["provider"] for rate in card.rates}:
+        pairs = {
+            (rate["model"], rate["version"])
+            for rate in card.rates
+            if rate["provider"] == provider
+        }
+        if len(pairs) == 1:
+            values[provider.casefold()] = next(iter(pairs))
+    return values
 
 
 def _billable_components(provider, usage):

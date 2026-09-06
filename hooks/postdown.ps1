@@ -1,8 +1,10 @@
 $ErrorActionPreference = 'Stop'
+$repoRoot = Split-Path -Parent $PSScriptRoot
+
 
 function Get-AzdEnvironmentValues {
     $values = @{}
-    $output = azd env get-values 2>$null
+    $output = azd env get-values --cwd $repoRoot 2>$null
     if ($LASTEXITCODE -eq 0) {
         foreach ($line in $output) {
             if ($line -match '^\s*([^=]+)=(.*)\s*$') {
@@ -11,6 +13,14 @@ function Get-AzdEnvironmentValues {
         }
     }
     return $values
+}
+
+function Test-ExplicitApproval {
+    param(
+        [string] $Value
+    )
+
+    return $Value -match '^(?i:true|1|yes)$'
 }
 
 $values = Get-AzdEnvironmentValues
@@ -176,15 +186,21 @@ if ($apimName) {
     }
 }
 
+$deleteEntraApplication = Test-ExplicitApproval ([Environment]::GetEnvironmentVariable('AI_OBSERVABILITY_DELETE_ENTRA_APP'))
 $clientId = $values['ENTRA_CLIENT_ID']
-if ($clientId) {
-    & az ad app delete --id $clientId --only-show-errors 2>$null
-    if ($LASTEXITCODE -ne 0) {
-        throw "Could not delete Entra app registration $clientId."
+if ($deleteEntraApplication) {
+    if ($clientId) {
+        & az ad app delete --id $clientId --only-show-errors 2>$null
+        if ($LASTEXITCODE -ne 0) {
+            throw "Could not delete Entra app registration $clientId."
+        }
+    }
+    else {
+        Write-Warning 'ENTRA_CLIENT_ID is unavailable. Delete the demo Entra app registration manually if full cleanup was approved.'
     }
 }
-else {
-    Write-Warning 'ENTRA_CLIENT_ID is unavailable. Check Microsoft Entra ID for an orphaned demo app registration.'
+elseif ($clientId) {
+    Write-Host "Retaining Entra app registration $clientId for a later azd up."
 }
 
 $keyVaultName = $values['USAGE_KEY_VAULT_NAME']

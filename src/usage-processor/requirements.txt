@@ -1,4 +1,5 @@
 azure-data-tables==12.7.0
+azure-eventhub==5.15.1
 azure-functions==2.3.0
 azure-identity==1.25.3
 azure-mgmt-costmanagement==5.0.0

@@ -6,6 +6,7 @@ import json
 import uuid
 
 from . import ALLOCATION_VERSION
+from .allocation import with_record_identity
 from .errors import FocusContractError
 
 
@@ -144,50 +145,60 @@ def external_result_etag(costs):
     return hashlib.sha256(encoded).hexdigest()
 
 
-def build_external_rows(costs, source_path, source_etag, generated_at=None):
+def build_external_rows(
+    costs,
+    source_path,
+    source_etag,
+    generated_at=None,
+    run_id=None,
+):
     generated_at = generated_at or datetime.now(timezone.utc)
-    run_id = str(uuid.uuid5(uuid.NAMESPACE_URL, source_path + "|" + source_etag))
+    run_id = run_id or str(
+        uuid.uuid5(uuid.NAMESPACE_URL, source_path + "|" + source_etag)
+    )
     rows = []
     for cost in costs:
         start = datetime.combine(cost.usage_date, time.min, tzinfo=timezone.utc)
         end = start + timedelta(days=1)
         rows.append(
-            {
-                "TimeGenerated": generated_at.isoformat(),
-                "RunId": run_id,
-                "AllocationVersion": ALLOCATION_VERSION,
-                "SourceType": "cost-management-query",
-                "SourceScope": "subscription",
-                "ChargePeriodStart": start.isoformat(),
-                "ChargePeriodEnd": end.isoformat(),
-                "BillingPeriodStart": start.replace(day=1).isoformat(),
-                "BillingPeriodEnd": None,
-                "Provider": "Anthropic",
-                "PublisherName": cost.publisher_name,
-                "MeterId": None,
-                "MeterName": cost.meter_name,
-                "ResourceId": None,
-                "BillingCurrency": cost.currency,
-                "SourceQuantity": None,
-                "SourceUnit": "CCU",
-                "SourceBilledCost": float(cost.billed_cost),
-                "SourceEffectiveCost": None,
-                "TeamId": None,
-                "SubjectId": None,
-                "AllocationBasis": "none-external-context",
-                "AllocationWeight": None,
-                "AllocationRatio": None,
-                "AllocatedBilledCost": None,
-                "AllocatedEffectiveCost": None,
-                "UnallocatedBilledCost": float(cost.billed_cost),
-                "UnallocatedEffectiveCost": None,
-                "AttributionStatus": "external-unallocated",
-                "IncludedInWorkloadTotal": False,
-                "RateCardVersionId": None,
-                "UsageSnapshotId": None,
-                "SourcePath": source_path,
-                "SourceETag": source_etag,
-            }
+            with_record_identity(
+                {
+                    "TimeGenerated": generated_at.isoformat(),
+                    "RunId": run_id,
+                    "AllocationVersion": ALLOCATION_VERSION,
+                    "SourceType": "cost-management-query",
+                    "SourceScope": "subscription",
+                    "ChargePeriodStart": start.isoformat(),
+                    "ChargePeriodEnd": end.isoformat(),
+                    "BillingPeriodStart": start.replace(day=1).isoformat(),
+                    "BillingPeriodEnd": None,
+                    "Provider": "Anthropic",
+                    "PublisherName": cost.publisher_name,
+                    "MeterId": None,
+                    "MeterName": cost.meter_name,
+                    "ResourceId": None,
+                    "BillingCurrency": cost.currency,
+                    "SourceQuantity": None,
+                    "SourceUnit": "CCU",
+                    "SourceBilledCost": float(cost.billed_cost),
+                    "SourceEffectiveCost": None,
+                    "TeamId": None,
+                    "SubjectId": None,
+                    "AllocationBasis": "none-external-context",
+                    "AllocationWeight": None,
+                    "AllocationRatio": None,
+                    "AllocatedBilledCost": None,
+                    "AllocatedEffectiveCost": None,
+                    "UnallocatedBilledCost": float(cost.billed_cost),
+                    "UnallocatedEffectiveCost": None,
+                    "AttributionStatus": "external-unallocated",
+                    "IncludedInWorkloadTotal": False,
+                    "RateCardVersionId": None,
+                    "UsageSnapshotId": None,
+                    "SourcePath": source_path,
+                    "SourceETag": source_etag,
+                }
+            )
         )
     return rows
 

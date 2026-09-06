@@ -53,7 +53,7 @@ router.post('/model-comparison/run', requireAuth, async (req, res, next) => {
     const correlationId = crypto.randomUUID();
     const sharedCall = {
       subscriptionKey: process.env.APIM_PRESENTER_KEY,
-      bearerToken: req.session.accessToken
+      bearerToken: req.user.accessToken
     };
 
     const [openAi, claude] = await Promise.all([

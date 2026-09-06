@@ -95,7 +95,7 @@ router.post('/scientific-code-explainer/explain', requireAuth, async (req, res, 
     const response = await callApim({
       path: '/models/openai/responses?api-version=2025-04-01-preview',
       subscriptionKey: process.env.APIM_PRESENTER_KEY,
-      bearerToken: req.session.accessToken,
+      bearerToken: req.user.accessToken,
       includeMetadata: true,
       extraHeaders: {
         'x-correlation-id': correlationId
@@ -142,7 +142,7 @@ router.post('/scientific-code-explainer/explain', requireAuth, async (req, res, 
         try {
           protectedMaterialCheck = await runProtectedMaterialCheck({
             code: generatedCode,
-            bearerToken: req.session.accessToken,
+            bearerToken: req.user.accessToken,
             correlationId
           });
           trackGuardrailDecision({
@@ -231,7 +231,7 @@ router.post('/scientific-code-explainer/check-protected-code', requireAuth, asyn
 
     const protectedMaterialCheck = await runProtectedMaterialCheck({
       code,
-      bearerToken: req.session.accessToken,
+      bearerToken: req.user.accessToken,
       correlationId
     });
     trackGuardrailDecision({

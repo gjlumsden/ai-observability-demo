@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Validate release contracts
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      NPM_CONFIG_REGISTRY: https://packagefeedproxy.microsoft.io/npm/
+      NPM_CONFIG_REPLACE_REGISTRY_HOST: always
+      NPM_CONFIG_AUDIT: "false"
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+      PIP_INDEX_URL: https://packagefeedproxy.microsoft.io/pypi/simple
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
+        with:
+          node-version: "24"
+
+      - name: Install verified Bicep CLI
+        shell: pwsh
+        run: |
+          $bicepPath = Join-Path $env:RUNNER_TEMP 'bicep.exe'
+          $uri = 'https://github.com/Azure/bicep/releases/download/v0.45.15/bicep-win-x64.exe'
+          Invoke-WebRequest -Uri $uri -OutFile $bicepPath
+          $digest = (Get-FileHash -LiteralPath $bicepPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($digest -ne 'cae4539a30fd496d126d1cb6fbc077b9c259c79a73306be767ad90fc8d190150') {
+            throw "Bicep CLI digest mismatch: $digest"
+          }
+          "BICEP_CLI_PATH=$bicepPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          & $bicepPath --version
+
+      - name: Install Python dependencies
+        shell: pwsh
+        run: python -m pip install --requirement .\src\usage-processor\requirements.txt
+
+      - name: Install Node.js dependencies
+        shell: pwsh
+        run: npm.cmd ci --prefix .\src\web
+
+      - name: Run release acceptance checks
+        shell: pwsh
+        run: .\scripts\test-token-cost-attribution.ps1

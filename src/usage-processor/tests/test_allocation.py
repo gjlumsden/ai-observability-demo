@@ -16,14 +16,15 @@ from usage_processor.cost_context import (
     external_result_etag,
     select_exact_claude_ccu,
 )
-from usage_processor.errors import ScopeViolation
+from usage_processor.errors import FocusContractError, ScopeViolation
 from usage_processor.focus import (
+    classify_provider,
     enforce_focus_row_scope,
     group_focus_rows,
     validate_focus_rows,
     validate_manifest_scope,
 )
-from usage_processor.errors import FocusContractError
+from usage_processor.validation import ContractValidator
 
 from helpers import MODEL_RESOURCE_ID, RESOURCE_GROUP_ID, SUBSCRIPTION_ID
 
@@ -141,8 +142,8 @@ class ScopeTests(unittest.TestCase):
             "ChargePeriodStart": datetime(2026, 8, 28, tzinfo=timezone.utc),
             "ChargePeriodEnd": datetime(2026, 8, 29, tzinfo=timezone.utc),
             "PublisherName": "Microsoft",
-            "ServiceName": "Azure OpenAI Service",
-            "SkuMeter": "gpt-5.4",
+            "ServiceName": "Foundry Models",
+            "SkuMeter": "5.4 inp Gl",
             "x_SkuMeterId": "meter",
             "ResourceId": MODEL_RESOURCE_ID,
             "x_ResourceGroupName": "ai-observability-demo",
@@ -153,6 +154,22 @@ class ScopeTests(unittest.TestCase):
         groups = group_focus_rows([row], [MODEL_RESOURCE_ID])
         self.assertEqual(len(groups), 1)
         self.assertEqual(groups[0].provider, "OpenAI")
+        self.assertEqual(groups[0].model, "gpt-5.4")
+        self.assertEqual(groups[0].token_category, "uncached_input")
+
+    def test_cognitive_services_name_does_not_classify_an_unknown_meter(self):
+        row = {
+            "PublisherName": "Microsoft",
+            "ServiceName": "Azure Cognitive Services",
+            "SkuMeter": "Document Intelligence Pages",
+        }
+        self.assertIsNone(
+            classify_provider(
+                row,
+                MODEL_RESOURCE_ID.lower(),
+                {MODEL_RESOURCE_ID.lower()},
+            )
+        )
 
     def test_resource_group_ccu_uses_the_claude_provider(self):
         row = {
@@ -171,6 +188,8 @@ class ScopeTests(unittest.TestCase):
         }
         groups = group_focus_rows([row], [MODEL_RESOURCE_ID])
         self.assertEqual(groups[0].provider, "Anthropic")
+        self.assertEqual(groups[0].model, "claude-opus-5")
+        self.assertEqual(groups[0].token_category, "estimated_cost")
 
         allocations = allocate_cost_bucket(
             groups[0],
@@ -190,6 +209,18 @@ class ScopeTests(unittest.TestCase):
                 [{"BilledCost": Decimal("1")}],
                 RESOURCE_GROUP_ID,
             )
+
+    def test_focus_layout_rejects_empty_required_values(self):
+        row = {
+            "BilledCost": Decimal("1"),
+            "EffectiveCost": Decimal("1"),
+            "BillingCurrency": "",
+            "ChargePeriodStart": datetime(2026, 8, 28, tzinfo=timezone.utc),
+            "ChargePeriodEnd": datetime(2026, 8, 29, tzinfo=timezone.utc),
+            "ResourceId": MODEL_RESOURCE_ID,
+        }
+        with self.assertRaisesRegex(FocusContractError, "empty required fields"):
+            validate_focus_rows([row], RESOURCE_GROUP_ID)
 
 
 class ExternalContextTests(unittest.TestCase):
@@ -222,6 +253,7 @@ class ExternalContextTests(unittest.TestCase):
         self.assertIsNone(rows[0]["TeamId"])
         self.assertIsNone(rows[0]["SubjectId"])
         self.assertIsNone(rows[0]["AllocatedBilledCost"])
+        ContractValidator().validate_allocation(rows[0])
 
 
 if __name__ == "__main__":

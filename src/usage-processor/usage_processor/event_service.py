@@ -33,22 +33,18 @@ def process_event_batch(
     quarantined = 0
     quarantine_failures = []
     duplicates = 0
+    batch_event_ids = set()
     for binding_event in events:
         evidence = extract_event_evidence(binding_event)
         body = bytes(binding_event.get_body())
         try:
             event = parse_event(body)
             validator.validate_event(event)
-            enforce_usage_scope(event, settings.workload_resource_group_id)
-            if (
-                settings.workload_model_resource_ids
-                and event["modelResourceId"].strip("/").casefold()
-                not in {
-                    item.strip("/").casefold()
-                    for item in settings.workload_model_resource_ids
-                }
-            ):
-                raise ScopeViolation("usage-model-resource-not-allowlisted")
+            enforce_usage_scope(
+                event,
+                settings.workload_resource_group_id,
+                settings.workload_model_resource_ids,
+            )
         except EventValidationError as error:
             try:
                 quarantine_writer.write(
@@ -80,6 +76,11 @@ def process_event_batch(
                 )
             quarantined += 1
             continue
+
+        if event["eventId"] in batch_event_ids:
+            duplicates += 1
+            continue
+        batch_event_ids.add(event["eventId"])
 
         claim = state_store.claim_event(
             event["eventId"],

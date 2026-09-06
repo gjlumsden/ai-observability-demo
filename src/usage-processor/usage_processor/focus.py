@@ -5,12 +5,14 @@ from pathlib import PurePosixPath
 
 from .allocation import CostBucket, decimal_value
 from .errors import FocusContractError, ScopeViolation
+from .rates import load_azure_meter_map, load_provider_model_versions
 from .settings import canonical_resource_id
 
 
 REQUIRED_FOCUS_COLUMNS = {
     "BilledCost",
     "BillingCurrency",
+    "ChargePeriodEnd",
     "ChargePeriodStart",
     "EffectiveCost",
     "ResourceId",
@@ -26,12 +28,8 @@ OPENAI_SERVICES = {
     "azure cognitive services",
     "azure openai",
     "azure openai service",
+    "foundry models",
     "microsoft foundry",
-}
-GPT_METERS = {
-    "gpt-5.4",
-    "gpt-5.4-mini",
-    "gpt-5.4-nano",
 }
 
 
@@ -116,7 +114,8 @@ def validate_focus_rows(rows, workload_resource_group_id):
         raise FocusContractError(
             "The FOCUS dataset is missing required columns: " + ", ".join(missing)
         )
-    for row in rows:
+    for row_number, row in enumerate(rows, start=1):
+        _validate_required_focus_values(row, row_number)
         enforce_focus_row_scope(row, workload_resource_group_id)
 
 
@@ -166,7 +165,12 @@ def group_focus_rows(rows, allowed_model_resource_ids):
         meter_name = _string(
             _first(row, "SkuMeter", "x_SkuMeterName", "MeterName")
         )
-        provider = classify_provider(row, resource_id, allowed)
+        classification = classify_meter(row, resource_id, allowed)
+        provider = classification[0] if classification else None
+        model = classification[1] if classification else None
+        token_category = classification[2] if classification else None
+        unit_rate = classification[3] if classification else None
+        rate_card_version_id = classification[4] if classification else None
         currency = _string(_first(row, "BillingCurrency"))
         key = (
             day_start,
@@ -177,6 +181,10 @@ def group_focus_rows(rows, allowed_model_resource_ids):
             resource_id,
             currency,
             _string(_first(row, "ConsumedUnit", "PricingUnit")),
+            model,
+            token_category,
+            unit_rate,
+            rate_card_version_id,
         )
         grouped[key].append((row, end))
 
@@ -191,6 +199,10 @@ def group_focus_rows(rows, allowed_model_resource_ids):
             resource_id,
             currency,
             source_unit,
+            model,
+            token_category,
+            unit_rate,
+            rate_card_version_id,
         ) = key
         billed = _sum_optional(row.get("BilledCost") for row, _ in entries)
         effective = _sum_optional(row.get("EffectiveCost") for row, _ in entries)
@@ -224,26 +236,51 @@ def group_focus_rows(rows, allowed_model_resource_ids):
                 source_unit=source_unit,
                 billed_cost=billed,
                 effective_cost=effective,
+                model=model,
+                token_category=token_category,
+                unit_rate=unit_rate,
+                rate_card_version_id=rate_card_version_id,
             )
         )
     return buckets
 
 
 def classify_provider(row, resource_id, allowed_model_resource_ids):
+    classification = classify_meter(row, resource_id, allowed_model_resource_ids)
+    return classification[0] if classification else None
+
+
+def classify_meter(row, resource_id, allowed_model_resource_ids):
     publisher = (_string(_first(row, "PublisherName", "x_PublisherId")) or "").casefold()
     meter = (
         _string(_first(row, "SkuMeter", "x_SkuMeterName", "MeterName")) or ""
     ).casefold()
     if publisher in CLAUDE_PUBLISHERS and meter in CLAUDE_METERS:
-        return "Anthropic"
+        model_version = load_provider_model_versions().get("anthropic")
+        if model_version is None:
+            return "Anthropic", None, None, None, None
+        return (
+            "Anthropic",
+            model_version[0],
+            "estimated_cost",
+            None,
+            model_version[1],
+        )
 
     service = (_string(_first(row, "ServiceName", "x_SkuMeterCategory")) or "").casefold()
+    mapping = load_azure_meter_map().get(meter)
     if (
-        resource_id in allowed_model_resource_ids
-        and publisher in MICROSOFT_PUBLISHERS
-        and (service in OPENAI_SERVICES or meter in GPT_METERS)
+        publisher in MICROSOFT_PUBLISHERS
+        and service in OPENAI_SERVICES
+        and mapping is not None
     ):
-        return "OpenAI"
+        return (
+            "OpenAI",
+            mapping.model,
+            mapping.token_type,
+            mapping.list_price,
+            mapping.version,
+        )
     return None
 
 
@@ -259,6 +296,37 @@ def is_claude_ccu_bucket(bucket):
 def _sum_optional(values):
     converted = [decimal_value(value) for value in values if value is not None]
     return sum(converted, start=decimal_value(0)) if converted else None
+
+
+def _validate_required_focus_values(row, row_number):
+    missing = [
+        name
+        for name in REQUIRED_FOCUS_COLUMNS
+        if name not in row or row[name] is None or row[name] == ""
+    ]
+    if missing:
+        raise FocusContractError(
+            f"FOCUS row {row_number} has empty required fields: "
+            + ", ".join(sorted(missing))
+        )
+    try:
+        decimal_value(row["BilledCost"])
+        decimal_value(row["EffectiveCost"])
+        start = _datetime_value(row["ChargePeriodStart"])
+        end = _datetime_value(row.get("ChargePeriodEnd"))
+    except (TypeError, ValueError) as error:
+        raise FocusContractError(
+            f"FOCUS row {row_number} has an invalid required value."
+        ) from error
+    if end <= start:
+        raise FocusContractError(
+            f"FOCUS row {row_number} has a non-positive charge period."
+        )
+    currency = str(row["BillingCurrency"]).strip()
+    if len(currency) != 3 or not currency.isalpha():
+        raise FocusContractError(
+            f"FOCUS row {row_number} has an invalid billing currency."
+        )
 
 
 def _datetime_value(value):

@@ -1,3 +1,10 @@
+"""Custom workload allocation built on Microsoft FOCUS and Logs Ingestion.
+
+The upstream services normalize cost and append log rows. They do not allocate
+cost to application subjects or publish several ingestion batches atomically.
+Stable record IDs and a final run marker make those custom operations retryable.
+"""
+
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation, ROUND_HALF_EVEN
@@ -8,6 +15,8 @@ from . import ALLOCATION_VERSION
 
 
 ALLOCATION_QUANTUM = Decimal("0.000000000001")
+ALLOCATION_RECORD_TYPE = "allocation"
+RUN_COMPLETE_RECORD_TYPE = "run-complete"
 
 
 def decimal_value(value):
@@ -46,6 +55,10 @@ class CostBucket:
     source_unit: str | None
     billed_cost: Decimal | None
     effective_cost: Decimal | None
+    model: str | None = None
+    token_category: str | None = None
+    unit_rate: Decimal | None = None
+    rate_card_version_id: str | None = None
 
 
 def usage_snapshot_id(weights):
@@ -100,21 +113,23 @@ def allocate_cost_bucket(
 
     if total_weight <= 0:
         return [
-            {
-                **common,
-                "TeamId": None,
-                "SubjectId": None,
-                "AllocationBasis": "none",
-                "AllocationWeight": None,
-                "AllocationRatio": None,
-                "AllocatedBilledCost": None,
-                "AllocatedEffectiveCost": None,
-                "UnallocatedBilledCost": _as_float(bucket.billed_cost),
-                "UnallocatedEffectiveCost": _as_float(bucket.effective_cost),
-                "AttributionStatus": no_usage_status,
-                "IncludedInWorkloadTotal": True,
-                "RateCardVersionId": None,
-            }
+            with_record_identity(
+                {
+                    **common,
+                    "TeamId": None,
+                    "SubjectId": None,
+                    "AllocationBasis": "none",
+                    "AllocationWeight": None,
+                    "AllocationRatio": None,
+                    "AllocatedBilledCost": None,
+                    "AllocatedEffectiveCost": None,
+                    "UnallocatedBilledCost": _as_float(bucket.billed_cost),
+                    "UnallocatedEffectiveCost": _as_float(bucket.effective_cost),
+                    "AttributionStatus": no_usage_status,
+                    "IncludedInWorkloadTotal": True,
+                    "RateCardVersionId": None,
+                },
+            )
         ]
 
     rows = []
@@ -136,44 +151,48 @@ def allocate_cost_bucket(
         if effective is not None:
             allocated_effective += effective
         rows.append(
-            {
-                **common,
-                "TeamId": weight.team_id,
-                "SubjectId": weight.subject_id,
-                "AllocationBasis": "rate-card-estimated-cost",
-                "AllocationWeight": _as_float(weight.weight),
-                "AllocationRatio": float(ratio),
-                "AllocatedBilledCost": _as_float(billed),
-                "AllocatedEffectiveCost": _as_float(effective),
-                "UnallocatedBilledCost": 0.0 if billed is not None else None,
-                "UnallocatedEffectiveCost": (
-                    0.0 if effective is not None else None
-                ),
-                "AttributionStatus": "allocated",
-                "IncludedInWorkloadTotal": True,
-                "RateCardVersionId": weight.rate_card_version_id,
-            }
+            with_record_identity(
+                {
+                    **common,
+                    "TeamId": weight.team_id,
+                    "SubjectId": weight.subject_id,
+                    "AllocationBasis": "rate-card-estimated-cost",
+                    "AllocationWeight": _as_float(weight.weight),
+                    "AllocationRatio": float(ratio),
+                    "AllocatedBilledCost": _as_float(billed),
+                    "AllocatedEffectiveCost": _as_float(effective),
+                    "UnallocatedBilledCost": 0.0 if billed is not None else None,
+                    "UnallocatedEffectiveCost": (
+                        0.0 if effective is not None else None
+                    ),
+                    "AttributionStatus": "allocated",
+                    "IncludedInWorkloadTotal": True,
+                    "RateCardVersionId": weight.rate_card_version_id,
+                },
+            )
         )
 
     residual_billed = _residual(bucket.billed_cost, allocated_billed)
     residual_effective = _residual(bucket.effective_cost, allocated_effective)
     if _is_nonzero(residual_billed) or _is_nonzero(residual_effective):
         rows.append(
-            {
-                **common,
-                "TeamId": None,
-                "SubjectId": None,
-                "AllocationBasis": "rounding-residual",
-                "AllocationWeight": 0.0,
-                "AllocationRatio": 0.0,
-                "AllocatedBilledCost": None,
-                "AllocatedEffectiveCost": None,
-                "UnallocatedBilledCost": _as_float(residual_billed),
-                "UnallocatedEffectiveCost": _as_float(residual_effective),
-                "AttributionStatus": "residual",
-                "IncludedInWorkloadTotal": True,
-                "RateCardVersionId": None,
-            }
+            with_record_identity(
+                {
+                    **common,
+                    "TeamId": None,
+                    "SubjectId": None,
+                    "AllocationBasis": "rounding-residual",
+                    "AllocationWeight": 0.0,
+                    "AllocationRatio": 0.0,
+                    "AllocatedBilledCost": None,
+                    "AllocatedEffectiveCost": None,
+                    "UnallocatedBilledCost": _as_float(residual_billed),
+                    "UnallocatedEffectiveCost": _as_float(residual_effective),
+                    "AttributionStatus": "residual",
+                    "IncludedInWorkloadTotal": True,
+                    "RateCardVersionId": None,
+                },
+            )
         )
     return rows
 
@@ -189,42 +208,137 @@ def unavailable_claude_row(
     generated_at=None,
 ):
     generated_at = generated_at or datetime.now(timezone.utc)
-    return {
+    return with_record_identity(
+        {
+            "TimeGenerated": _iso(generated_at),
+            "RunId": run_id,
+            "AllocationVersion": ALLOCATION_VERSION,
+            "SourceType": "finops-hub-focus-v1.2-preview",
+            "SourceScope": source_scope,
+            "ChargePeriodStart": _iso(charge_period_start),
+            "ChargePeriodEnd": _iso(charge_period_end),
+            "BillingPeriodStart": None,
+            "BillingPeriodEnd": None,
+            "Provider": "Anthropic",
+            "PublisherName": "Anthropic",
+            "MeterId": None,
+            "MeterName": "Claude Consumption Unit",
+            "ResourceId": None,
+            "BillingCurrency": None,
+            "SourceQuantity": None,
+            "SourceUnit": "CCU",
+            "SourceBilledCost": None,
+            "SourceEffectiveCost": None,
+            "TeamId": None,
+            "SubjectId": None,
+            "AllocationBasis": "none",
+            "AllocationWeight": None,
+            "AllocationRatio": None,
+            "AllocatedBilledCost": None,
+            "AllocatedEffectiveCost": None,
+            "UnallocatedBilledCost": None,
+            "UnallocatedEffectiveCost": None,
+            "AttributionStatus": "actual-unavailable-at-resource-group-scope",
+            "IncludedInWorkloadTotal": False,
+            "RateCardVersionId": None,
+            "UsageSnapshotId": None,
+            "SourcePath": source_path,
+            "SourceETag": source_etag,
+        }
+    )
+
+
+def build_run_complete_row(
+    *,
+    run_id,
+    source_type,
+    source_scope,
+    source_path,
+    source_etag,
+    expected_record_count,
+    generated_at=None,
+):
+    generated_at = generated_at or datetime.now(timezone.utc)
+    row = {
         "TimeGenerated": _iso(generated_at),
         "RunId": run_id,
         "AllocationVersion": ALLOCATION_VERSION,
-        "SourceType": "finops-hub-focus-v1.2-preview",
+        "SourceType": source_type,
         "SourceScope": source_scope,
-        "ChargePeriodStart": _iso(charge_period_start),
-        "ChargePeriodEnd": _iso(charge_period_end),
+        "ChargePeriodStart": None,
+        "ChargePeriodEnd": None,
         "BillingPeriodStart": None,
         "BillingPeriodEnd": None,
-        "Provider": "Anthropic",
-        "PublisherName": "Anthropic",
+        "Provider": None,
+        "PublisherName": None,
         "MeterId": None,
-        "MeterName": "Claude Consumption Unit",
+        "MeterName": None,
         "ResourceId": None,
         "BillingCurrency": None,
         "SourceQuantity": None,
-        "SourceUnit": "CCU",
+        "SourceUnit": None,
         "SourceBilledCost": None,
         "SourceEffectiveCost": None,
         "TeamId": None,
         "SubjectId": None,
-        "AllocationBasis": "none",
+        "AllocationBasis": "run-publication",
         "AllocationWeight": None,
         "AllocationRatio": None,
         "AllocatedBilledCost": None,
         "AllocatedEffectiveCost": None,
         "UnallocatedBilledCost": None,
         "UnallocatedEffectiveCost": None,
-        "AttributionStatus": "actual-unavailable-at-resource-group-scope",
+        "AttributionStatus": "run-complete",
         "IncludedInWorkloadTotal": False,
         "RateCardVersionId": None,
         "UsageSnapshotId": None,
         "SourcePath": source_path,
         "SourceETag": source_etag,
+        "RecordType": RUN_COMPLETE_RECORD_TYPE,
+        "ExpectedRecordCount": expected_record_count,
     }
+    return with_record_identity(row)
+
+
+def with_record_identity(row):
+    result = dict(row)
+    result.setdefault("RecordType", ALLOCATION_RECORD_TYPE)
+    result.setdefault("ExpectedRecordCount", None)
+    identity_fields = {
+        key: result.get(key)
+        for key in (
+            "RunId",
+            "SourceType",
+            "SourceScope",
+            "SourcePath",
+            "SourceETag",
+            "ChargePeriodStart",
+            "ChargePeriodEnd",
+            "BillingPeriodStart",
+            "BillingPeriodEnd",
+            "Provider",
+            "PublisherName",
+            "MeterId",
+            "MeterName",
+            "ResourceId",
+            "BillingCurrency",
+            "SourceUnit",
+            "TeamId",
+            "SubjectId",
+            "AllocationBasis",
+            "AttributionStatus",
+            "RateCardVersionId",
+            "RecordType",
+            "ExpectedRecordCount",
+        )
+    }
+    encoded = json.dumps(
+        identity_fields,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    result["RecordId"] = hashlib.sha256(encoded).hexdigest()
+    return result
 
 
 def _common_row(

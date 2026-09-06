@@ -20,6 +20,8 @@ var apimResourceId = resourceId(
   'Microsoft.ApiManagement/service',
   'ai-observability-demo-apim-${resourceSuffix}'
 )
+var functionAppName = take('aiobs-usage-func-${cleanSuffix}', 60)
+var eventHubConsumerGroupName = 'processor'
 
 resource law 'Microsoft.OperationalInsights/workspaces@2023-09-01' = {
   name: lawName
@@ -62,7 +64,17 @@ var workbookWithFoundry = replace(
   '__FOUNDRY_RESOURCE_ID__',
   foundryResourceId
 )
-var workbookJson = replace(workbookWithFoundry, '__APIM_RESOURCE_ID__', apimResourceId)
+var workbookWithFunctionApp = replace(
+  workbookWithFoundry,
+  '__FUNCTION_APP_NAME__',
+  functionAppName
+)
+var workbookWithConsumerGroup = replace(
+  workbookWithFunctionApp,
+  '__EVENT_HUB_CONSUMER_GROUP__',
+  eventHubConsumerGroupName
+)
+var workbookJson = replace(workbookWithConsumerGroup, '__APIM_RESOURCE_ID__', apimResourceId)
 
 resource costGovernanceWorkbook 'Microsoft.Insights/workbooks@2023-06-01' = {
   name: guid(resourceGroup().id, 'ai-observability-cost-governance-workbook')

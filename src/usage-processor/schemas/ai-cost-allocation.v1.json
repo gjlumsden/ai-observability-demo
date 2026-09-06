@@ -38,7 +38,10 @@
     "RateCardVersionId",
     "UsageSnapshotId",
     "SourcePath",
-    "SourceETag"
+    "SourceETag",
+    "RecordId",
+    "RecordType",
+    "ExpectedRecordCount"
   ],
   "properties": {
     "TimeGenerated": {
@@ -176,6 +179,23 @@
     },
     "SourceETag": {
       "$ref": "#/$defs/nullableString"
+    },
+    "RecordId": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "RecordType": {
+      "enum": [
+        "allocation",
+        "run-complete"
+      ]
+    },
+    "ExpectedRecordCount": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
     }
   },
   "$defs": {

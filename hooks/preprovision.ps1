@@ -48,24 +48,27 @@ function Test-AzurePermission {
   return $false
 }
 
-function Remove-LegacyResource {
+function Test-AzureResourceExists {
   param(
       [Parameter(Mandatory = $true)][string] $ResourceId,
-      [string] $ApiVersion = ''
+      [Parameter(Mandatory = $true)][string] $ApiVersion
   )
 
-  $arguments = @(
-      'resource', 'delete',
-      '--only-show-errors',
-      '--ids', $ResourceId
-  )
-  if ($ApiVersion) {
-      $arguments += @('--api-version', $ApiVersion)
+  $output = & az rest `
+      --only-show-errors `
+      --method GET `
+      --uri "https://management.azure.com${ResourceId}?api-version=${ApiVersion}" `
+      --output none 2>&1
+  if ($LASTEXITCODE -eq 0) {
+      return $true
   }
-  $output = & az @arguments 2>&1
-  if ($LASTEXITCODE -ne 0 -and ($output -join "`n") -notmatch 'NotFound|not found|could not be found') {
-      throw "Could not remove legacy resource $ResourceId`: $($output -join "`n")"
+
+  $message = $output -join "`n"
+  if ($message -match 'NotFound|not found|could not be found|ResourceNotFound|does not exist') {
+      return $false
   }
+
+  throw "Could not inspect existing resource $ResourceId`: $message"
 }
 
 $values = Get-AzdEnvironmentValues
@@ -175,12 +178,9 @@ $requiredActions = @(
   'Microsoft.CostManagement/exports/write'
   'Microsoft.CostManagement/exports/delete'
   'Microsoft.Consumption/budgets/write'
-  'Microsoft.DataFactory/factories/*'
+  'Microsoft.DataFactory/factories/write'
   'Microsoft.Web/sites/config/write'
 )
-if ($missingProviders.Count -gt 0) {
-  $requiredActions += 'Microsoft.Resources/subscriptions/providers/register/action'
-}
 $missingActions = @($requiredActions | Where-Object { -not (Test-AzurePermission $permissions $_) })
 if ($missingActions.Count -gt 0) {
   $formattedActions = $missingActions | ForEach-Object { "  - $_" }
@@ -192,13 +192,13 @@ Subscription-level role assignment access is required for the processor Cost Man
 "@
 }
 
-Write-Host 'Checking required Azure resource providers...'
-foreach ($providerNamespace in $missingProviders) {
-    Write-Host "Registering $providerNamespace..."
-    & az provider register --namespace $providerNamespace --wait --only-show-errors
-    if ($LASTEXITCODE -ne 0) {
-      throw "Could not register $providerNamespace. Confirm Microsoft.Resources/subscriptions/providers/register/action at subscription scope."
-    }
+if ($missingProviders.Count -gt 0) {
+  $formattedProviders = $missingProviders | ForEach-Object { "  - $_" }
+  throw @"
+The required Azure resource providers are not registered:
+$($formattedProviders -join "`n")
+Register the missing providers before deployment. The provider-registration and legacy-resource checks in this hook are read-only and will not change Azure state.
+"@
 }
 
 $resourceGroupExists = if ($resourceGroupName) {
@@ -209,9 +209,6 @@ else {
 }
 if ($resourceGroupExists) {
   $mainResourceGroupId = "$subscriptionScope/resourceGroups/$resourceGroupName"
-  $legacyExportId = "$mainResourceGroupId/providers/Microsoft.CostManagement/exports/ai-observability-demo-daily-actual-cost"
-  Remove-LegacyResource $legacyExportId '2025-03-01'
-
   $resourceInventoryJson = @(& az resource list `
     --subscription $subscriptionId `
     --resource-group $resourceGroupName `
@@ -219,8 +216,15 @@ if ($resourceGroupExists) {
   if ($LASTEXITCODE -ne 0) {
     throw "Could not inspect legacy resources in $resourceGroupName."
   }
+
   $resourceInventory = @(($resourceInventoryJson -join "`n" | ConvertFrom-Json))
-  $legacyResources = @(
+  $blockingLegacyResources = [System.Collections.Generic.List[string]]::new()
+  $legacyExportId = "$mainResourceGroupId/providers/Microsoft.CostManagement/exports/ai-observability-demo-daily-actual-cost"
+  if (Test-AzureResourceExists -ResourceId $legacyExportId -ApiVersion '2025-03-01') {
+    $blockingLegacyResources.Add("Cost Management export: $legacyExportId")
+  }
+
+  foreach ($legacyResource in @(
     $resourceInventory |
       Where-Object {
         ($_.type -ieq 'Microsoft.Logic/workflows' -and $_.name -like 'ai-observability-demo-finops-*') -or
@@ -228,10 +232,8 @@ if ($resourceGroupExists) {
         ($_.type -ieq 'Microsoft.Insights/dataCollectionRules' -and $_.name -like 'ai-observability-demo-dcr-*') -or
         ($_.type -ieq 'Microsoft.Storage/storageAccounts' -and $_.name -like 'aiobservabilityst*')
       }
-  )
-  foreach ($legacyResource in $legacyResources) {
-    Write-Host "Removing legacy financial resource $($legacyResource.name)..."
-    Remove-LegacyResource $legacyResource.id
+  )) {
+    $blockingLegacyResources.Add("$($legacyResource.type): $($legacyResource.id)")
   }
 
   $workspaceIds = @(
@@ -245,8 +247,21 @@ if ($resourceGroupExists) {
       'AIObservabilityFinOpsState_CL'
       'AIObservabilityResourceInventory_CL'
     )) {
-      Remove-LegacyResource "$workspaceId/tables/$tableName" '2023-09-01'
+      $tableResourceId = "$workspaceId/tables/$tableName"
+      if (Test-AzureResourceExists -ResourceId $tableResourceId -ApiVersion '2023-09-01') {
+        $blockingLegacyResources.Add("Log Analytics table: $tableResourceId")
+      }
     }
+  }
+
+  if ($blockingLegacyResources.Count -gt 0) {
+    $formattedResources = $blockingLegacyResources | ForEach-Object { "  - $_" }
+    throw @"
+Legacy billing resources from the previous design are still present:
+$($formattedResources -join "`n")
+Run .\demo-scripts\teardown.ps1 before the first redesign deployment. This preprovision hook will not delete existing billing state automatically.
+If you need an in-place migration, stop and get explicit migration approval before changing these resources.
+"@
   }
 }
 
@@ -264,10 +279,12 @@ $location = if ($values['AZURE_LOCATION']) { $values['AZURE_LOCATION'] } else { 
 if ($deletedVaultName -and $resourceGroupName) {
   $deletedVaultJson = @(& az keyvault list-deleted `
     --subscription $subscriptionId `
-    --query "[?name=='$deletedVaultName'] | [0]" `
+    --query "[?name=='$deletedVaultName'] | [0].{name:name,location:properties.location}" `
     --output json 2>$null)
   $deletedVaultText = $deletedVaultJson -join "`n"
   if ($LASTEXITCODE -eq 0 -and $deletedVaultText -and $deletedVaultText.Trim() -ne 'null') {
+    $deletedVault = $deletedVaultJson -join "`n" | ConvertFrom-Json
+    $deletedVaultLocation = if ($deletedVault.location) { $deletedVault.location } else { $location }
     Write-Host "Recovering purge-protected Key Vault $deletedVaultName..."
     & az group create `
       --subscription $subscriptionId `
@@ -283,7 +300,7 @@ if ($deletedVaultName -and $resourceGroupName) {
       --subscription $subscriptionId `
       --name $deletedVaultName `
       --resource-group $resourceGroupName `
-      --location 'swedencentral' `
+      --location $deletedVaultLocation `
       --only-show-errors `
       --output none
     if ($LASTEXITCODE -ne 0) {

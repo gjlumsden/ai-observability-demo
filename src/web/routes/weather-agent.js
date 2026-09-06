@@ -33,7 +33,7 @@ router.post('/weather-agent/run', requireAuth, async (req, res, next) => {
     const response = await callApim({
       path: '/agents/weather/responses',
       subscriptionKey: process.env.APIM_PRESENTER_KEY,
-      bearerToken: req.session.accessToken,
+      bearerToken: req.user.accessToken,
       includeMetadata: true,
       extraHeaders: {
         'x-correlation-id': correlationId

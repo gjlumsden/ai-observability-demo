@@ -91,34 +91,75 @@ resource secretBootstrap 'Microsoft.Resources/deploymentScripts@2023-08-01' = {
     scriptContent: '''
       set -euo pipefail
 
-      for attempt in $(seq 1 60); do
-        token="$(curl --fail --silent --show-error -H Metadata:true "http://169.254.169.254/metadata/identity/oauth2/token?api-version=2019-08-01&resource=https%3A%2F%2Fvault.azure.net&client_id=${IDENTITY_CLIENT_ID}" | jq -r .access_token)"
-        if curl --fail --silent --show-error \
-          -H "Authorization: Bearer $token" \
-          "${KEY_VAULT_URI}secrets/${SECRET_NAME}?api-version=7.4" \
-          >/dev/null 2>/dev/null; then
-          unset token
-          exit 0
-        fi
-
+      create_secret() {
         secret_value="$(openssl rand -base64 48 | tr -d '\n')"
         body="$(jq -cn --arg value "$secret_value" '{value:$value, attributes:{enabled:true}}')"
         if curl --fail --silent --show-error \
           -X PUT \
-          -H "Authorization: Bearer $token" \
+          -H "Authorization: Bearer ${token}" \
           -H 'Content-Type: application/json' \
           --data "$body" \
           "${KEY_VAULT_URI}secrets/${SECRET_NAME}?api-version=7.4" \
           >/dev/null 2>/dev/null; then
           unset secret_value
-          unset token
           unset body
-          exit 0
+          return 0
         fi
 
         unset secret_value
-        unset token
         unset body
+        return 1
+      }
+
+      for attempt in $(seq 1 60); do
+        if ! token="$(curl --fail --silent --show-error -H Metadata:true "http://169.254.169.254/metadata/identity/oauth2/token?api-version=2019-08-01&resource=https%3A%2F%2Fvault.azure.net&client_id=${IDENTITY_CLIENT_ID}" | jq -r .access_token)"; then
+          sleep 10
+          continue
+        fi
+        if [ -z "$token" ] || [ "$token" = 'null' ]; then
+          unset token
+          sleep 10
+          continue
+        fi
+
+        response_file="$(mktemp)"
+        if ! secret_status="$(curl --silent --show-error \
+          --output "$response_file" \
+          --write-out '%{http_code}' \
+          -H "Authorization: Bearer ${token}" \
+          "${KEY_VAULT_URI}secrets/${SECRET_NAME}?api-version=7.4")"; then
+          rm -f "$response_file"
+          unset response_file
+          unset token
+          sleep 10
+          continue
+        fi
+
+        case "$secret_status" in
+          200)
+            rm -f "$response_file"
+            unset response_file
+            unset secret_status
+            unset token
+            exit 0
+            ;;
+          404)
+            rm -f "$response_file"
+            unset response_file
+            if create_secret; then
+              unset secret_status
+              unset token
+              exit 0
+            fi
+            ;;
+          *)
+            rm -f "$response_file"
+            unset response_file
+            ;;
+        esac
+
+        unset secret_status
+        unset token
         sleep 10
       done
 

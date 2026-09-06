@@ -7,7 +7,7 @@ from usage_processor.normalization import (
     normalize_claude_usage,
     normalize_openai_usage,
 )
-from usage_processor.rates import RateCard
+from usage_processor.rates import RateCard, load_azure_meter_map
 
 
 class RateCardTests(unittest.TestCase):
@@ -110,6 +110,52 @@ class RateCardTests(unittest.TestCase):
             usage,
         )
         self.assertEqual(result.status, "no-rate")
+
+    def test_official_azure_meter_identifiers_map_exactly(self):
+        mappings = load_azure_meter_map()
+
+        self.assertEqual(
+            (
+                mappings["5.4 inp gl"].model,
+                mappings["5.4 inp gl"].token_type,
+            ),
+            ("gpt-5.4", "uncached_input"),
+        )
+        self.assertEqual(
+            (
+                mappings["5.4 mini cd inp gl 1m tokens"].model,
+                mappings["5.4 mini cd inp gl 1m tokens"].token_type,
+            ),
+            ("gpt-5.4-mini", "cached_input"),
+        )
+        self.assertEqual(
+            (
+                mappings["54 nano opt gl"].model,
+                mappings["54 nano opt gl"].token_type,
+            ),
+            ("gpt-5.4-nano", "output"),
+        )
+        self.assertNotIn("gpt-5.4", mappings)
+
+    def test_gpt_54_mini_cached_rate_matches_retail_record(self):
+        usage = normalize_openai_usage(
+            {
+                "input_tokens": 1_000_000,
+                "input_tokens_details": {"cached_tokens": 1_000_000},
+                "total_tokens": 1_000_000,
+            }
+        )
+
+        result = self.card.estimate(
+            "OpenAI",
+            "gpt-5.4-mini",
+            "GlobalStandard",
+            "2026-08-28T00:00:00Z",
+            usage,
+        )
+
+        self.assertEqual(result.status, "estimated")
+        self.assertEqual(result.amount, 0.075)
 
 
 if __name__ == "__main__":

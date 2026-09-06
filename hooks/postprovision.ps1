@@ -4,7 +4,7 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 
 function Get-AzdEnvironmentValues {
     $values = @{}
-    $output = azd env get-values 2>$null
+    $output = azd env get-values --cwd $repoRoot 2>$null
     if ($LASTEXITCODE -ne 0) {
         throw 'Could not read the active azd environment.'
     }
@@ -57,15 +57,57 @@ function Invoke-Az {
     }
 }
 
+function Invoke-AzText {
+    param(
+        [Parameter(Mandatory = $true)][string] $Area,
+        [Parameter(Mandatory = $true)][string[]] $Arguments
+    )
+
+    $output = & az @Arguments 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        throw "${Area}: $($output -join "`n")"
+    }
+    return ($output -join "`n").Trim()
+}
+
+function Get-OptionalEntraApplicationByClientId {
+    param(
+        [Parameter(Mandatory = $true)][string] $ClientId
+    )
+
+    $output = & az ad app show `
+        --only-show-errors `
+        --id $ClientId `
+        --output json 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        return ($output -join "`n" | ConvertFrom-Json)
+    }
+
+    $message = $output -join "`n"
+    if ($message -match 'does not exist|could not be found|cannot find|not found') {
+        Write-Warning "ENTRA_CLIENT_ID $ClientId does not resolve to an existing Entra app. The hook will create or reuse a replacement registration."
+        return $null
+    }
+
+    throw "Entra app lookup by client ID: $message"
+}
+
 $values = Get-AzdEnvironmentValues
 $resourceGroup = Get-RequiredValue $values 'AZURE_RESOURCE_GROUP'
 $tenantId = Get-RequiredValue $values 'AZURE_TENANT_ID'
+$entraLoginEndpoint = Invoke-AzText 'Azure cloud Active Directory endpoint' @(
+    'cloud', 'show',
+    '--only-show-errors',
+    '--query', 'endpoints.activeDirectory',
+    '--output', 'tsv'
+)
+$entraIssuer = '{0}/{1}/v2.0' -f $entraLoginEndpoint.TrimEnd('/'), $tenantId
 $webAppName = Get-RequiredValue $values 'WEB_APP_NAME'
 $apimName = Get-RequiredValue $values 'APIM_NAME'
 $finOpsHubName = Get-RequiredValue $values 'FINOPS_HUB_NAME'
 $weatherMcpBackendKeyNamedValueId = Get-RequiredValue $values 'WEATHER_MCP_BACKEND_KEY_NAMED_VALUE_ID'
 $webAppUrl = "https://$webAppName.azurewebsites.net"
-$redirectUri = "$webAppUrl/auth/callback"
+$redirectUri = "$webAppUrl/.auth/login/aad/callback"
 $displayName = "AI Observability Demo - $webAppName"
 $existingClientId = [Environment]::GetEnvironmentVariable('ENTRA_CLIENT_ID')
 if (-not $existingClientId -and $values.ContainsKey('ENTRA_CLIENT_ID')) {
@@ -97,15 +139,10 @@ if ($bootstrapRoleExitCode -ne 0 -and ($bootstrapRoleOutput -join "`n") -notmatc
 $values = Get-AzdEnvironmentValues
 
 Write-Host ''
-Write-Host 'Configuring Entra sign-in' -ForegroundColor Cyan
+Write-Host 'Configuring App Service authentication' -ForegroundColor Cyan
 
 $app = if ($existingClientId) {
-    Invoke-AzJson 'Entra app lookup by client ID' @(
-        'ad', 'app', 'show',
-        '--only-show-errors',
-        '--id', $existingClientId,
-        '--output', 'json'
-    )
+    Get-OptionalEntraApplicationByClientId -ClientId $existingClientId
 }
 else {
     $apps = Invoke-AzJson 'Entra app lookup by display name' @(
@@ -205,10 +242,6 @@ $credential = Invoke-AzJson 'Entra app credential' @(
     '--output', 'json'
 )
 
-$sessionSecretBytes = [byte[]]::new(48)
-[System.Security.Cryptography.RandomNumberGenerator]::Fill($sessionSecretBytes)
-$sessionSecret = [Convert]::ToBase64String($sessionSecretBytes)
-
 $currentSettings = Invoke-AzJson 'Web app settings lookup' @(
     'webapp', 'config', 'appsettings', 'list',
     '--only-show-errors',
@@ -225,7 +258,10 @@ if (-not $mcpWeatherKey) {
     $mcpWeatherKey = [Convert]::ToBase64String($mcpKeyBytes).TrimEnd('=').Replace('+', '-').Replace('/', '_')
 }
 
-Invoke-Az 'Web app authentication settings' @(
+$apiApplicationIdUri = "api://$($app.appId)"
+$scopeUri = "$apiApplicationIdUri/$scopeValue"
+
+Invoke-Az 'Web app app settings' @(
     'webapp', 'config', 'appsettings', 'set',
     '--only-show-errors',
     '--resource-group', $resourceGroup,
@@ -233,10 +269,44 @@ Invoke-Az 'Web app authentication settings' @(
     '--settings',
     "ENTRA_TENANT_ID=$tenantId",
     "ENTRA_CLIENT_ID=$($app.appId)",
-    "ENTRA_CLIENT_SECRET=$($credential.password)",
-    "ENTRA_SCOPES=api://$($app.appId)/$scopeValue",
-    "SESSION_SECRET=$sessionSecret",
+    "MICROSOFT_PROVIDER_AUTHENTICATION_SECRET=$($credential.password)",
     "MCP_WEATHER_KEY=$mcpWeatherKey",
+    '--output', 'none'
+)
+
+Invoke-Az 'Web app obsolete app settings cleanup' @(
+    'webapp', 'config', 'appsettings', 'delete',
+    '--only-show-errors',
+    '--resource-group', $resourceGroup,
+    '--name', $webAppName,
+    '--setting-names',
+    'ENTRA_CLIENT_SECRET',
+    'ENTRA_SCOPES',
+    'SESSION_SECRET',
+    '--output', 'none'
+)
+
+# Reapply Easy Auth on every postprovision run because infra\main.bicep provisions the
+# app-service module with a placeholder empty Entra client ID before this hook repairs it.
+Invoke-Az 'Web app Easy Auth provider' @(
+    'webapp', 'auth', 'update',
+    '--only-show-errors',
+    '--resource-group', $resourceGroup,
+    '--name', $webAppName,
+    '--enabled', 'true',
+    '--unauthenticated-client-action', 'AllowAnonymous',
+    '--enable-token-store', 'true',
+    '--set',
+    'identityProviders.azureActiveDirectory.enabled=true',
+    "identityProviders.azureActiveDirectory.registration.clientId=$($app.appId)",
+    'identityProviders.azureActiveDirectory.registration.clientSecretSettingName=MICROSOFT_PROVIDER_AUTHENTICATION_SECRET',
+    "identityProviders.azureActiveDirectory.registration.openIdIssuer=$entraIssuer",
+    "identityProviders.azureActiveDirectory.login.loginParameters[0]=scope=openid profile email offline_access $scopeUri",
+    # allowedAudiences restricts accepted aud claims for this API. allowedApplications
+    # restricts which client application IDs may call it.
+    "identityProviders.azureActiveDirectory.validation.allowedAudiences[0]=$($app.appId)",
+    "identityProviders.azureActiveDirectory.validation.allowedAudiences[1]=$apiApplicationIdUri",
+    "identityProviders.azureActiveDirectory.validation.defaultAuthorizationPolicy.allowedApplications[0]=$($app.appId)",
     '--output', 'none'
 )
 
@@ -262,7 +332,7 @@ Invoke-Az 'APIM weather MCP backend key' @(
     '--output', 'none'
 )
 
-azd env set ENTRA_CLIENT_ID $app.appId | Out-Null
+azd env set ENTRA_CLIENT_ID $app.appId --cwd $repoRoot | Out-Null
 if ($LASTEXITCODE -ne 0) {
     throw 'Could not store the Entra client ID in the azd environment.'
 }

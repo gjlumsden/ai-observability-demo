@@ -1,3 +1,4 @@
+from datetime import timedelta
 from functools import lru_cache
 
 from .allocation_service import (
@@ -5,6 +6,7 @@ from .allocation_service import (
     process_external_claude_context,
     process_focus_manifests,
 )
+from .checkpoint_monitor import CHECKPOINT_CONTAINER_NAME, monitor_checkpoints
 from .cost_context import SubscriptionCostQuery
 from .credentials import build_credential
 from .event_service import process_event_batch
@@ -117,3 +119,37 @@ def run_external_claude_context():
         ingestion_writer=ingestion_writer,
         validator=validator,
     )
+
+
+def run_checkpoint_monitor():
+    from azure.eventhub import EventHubConsumerClient
+    from azure.storage.blob import BlobServiceClient
+
+    settings = Settings.from_env()
+    settings.require_checkpoint_monitor()
+    credential = build_credential(settings.credential_client_id)
+    with EventHubConsumerClient(
+        fully_qualified_namespace=settings.event_hub_namespace,
+        eventhub_name=settings.event_hub_name,
+        consumer_group=settings.event_hub_consumer_group,
+        credential=credential,
+    ) as event_hub_client:
+        with BlobServiceClient(
+            account_url=settings.storage_blob_endpoint,
+            credential=credential,
+        ) as blob_service:
+            return monitor_checkpoints(
+                event_hub_client=event_hub_client,
+                checkpoint_container_client=blob_service.get_container_client(
+                    CHECKPOINT_CONTAINER_NAME
+                ),
+                event_hub_namespace=settings.event_hub_namespace,
+                event_hub_name=settings.event_hub_name,
+                consumer_group=settings.event_hub_consumer_group,
+                stale_after=timedelta(
+                    seconds=settings.checkpoint_stale_seconds
+                ),
+                idle_after=timedelta(
+                    seconds=settings.checkpoint_idle_seconds
+                ),
+            )

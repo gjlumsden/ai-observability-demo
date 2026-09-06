@@ -1,0 +1,243 @@
+from datetime import datetime, timezone
+from decimal import Decimal
+from types import SimpleNamespace
+import unittest
+from unittest.mock import patch
+
+import bootstrap  # noqa: F401
+
+from usage_processor.allocation import UsageWeight
+from usage_processor.allocation_service import process_focus_manifests
+from usage_processor.focus import FocusManifest
+from usage_processor.state import InMemoryStateStore
+from usage_processor.validation import ContractValidator
+
+from helpers import MODEL_RESOURCE_ID, RESOURCE_GROUP_ID, SUBSCRIPTION_ID
+
+
+MANIFEST_PATH = (
+    "Costs/2026/08/subscriptions/"
+    f"{SUBSCRIPTION_ID}/resourcegroups/ai-observability-demo/manifest.json"
+)
+
+
+def focus_row():
+    return {
+        "BilledCost": Decimal("9"),
+        "EffectiveCost": Decimal("8"),
+        "BillingCurrency": "USD",
+        "BillingPeriodStart": datetime(2026, 8, 1, tzinfo=timezone.utc),
+        "BillingPeriodEnd": datetime(2026, 9, 1, tzinfo=timezone.utc),
+        "ChargePeriodStart": datetime(2026, 8, 28, tzinfo=timezone.utc),
+        "ChargePeriodEnd": datetime(2026, 8, 29, tzinfo=timezone.utc),
+        "PublisherName": "Microsoft",
+        "ServiceName": "Foundry Models",
+        "SkuMeter": "5.4 opt Gl",
+        "x_SkuMeterId": "meter-output",
+        "ResourceId": MODEL_RESOURCE_ID,
+        "x_ResourceGroupName": "ai-observability-demo",
+        "SubAccountId": SUBSCRIPTION_ID,
+        "ConsumedQuantity": Decimal("1"),
+        "ConsumedUnit": "1M Tokens",
+    }
+
+
+class FakeSource:
+    def __init__(self, row=None):
+        self.manifest = FocusManifest(MANIFEST_PATH, "etag-1", ("data.parquet",))
+        self.row = row or focus_row()
+
+    def list_completed_manifests(self):
+        return [self.manifest]
+
+    def read_rows(self, manifest):
+        return [self.row]
+
+
+class FakeUsageQuery:
+    def __init__(self):
+        self.calls = 0
+
+    def get_weights(self, bucket, workload_resource_group_id):
+        self.calls += 1
+        return [
+            UsageWeight("TeamA", "a" * 43, Decimal("1"), "rate-v1"),
+            UsageWeight("TeamB", "b" * 43, Decimal("2"), "rate-v1"),
+            UsageWeight("TeamC", "c" * 43, Decimal("3"), "rate-v1"),
+        ]
+
+
+class FailureWriter:
+    def __init__(self, fail_calls=()):
+        self.fail_calls = set(fail_calls)
+        self.attempts = 0
+        self.successful = []
+
+    def upload(self, stream, rows):
+        self.attempts += 1
+        if self.attempts in self.fail_calls:
+            raise RuntimeError("simulated upload failure")
+        self.successful.append((stream, [dict(row) for row in rows]))
+
+
+class FailAllocatedTransitionOnce(InMemoryStateStore):
+    def __init__(self):
+        super().__init__()
+        self.failed = False
+
+    def transition(self, claim, status, properties=None):
+        if status == "allocated" and not self.failed:
+            self.failed = True
+            raise RuntimeError("simulated crash after upload")
+        return super().transition(claim, status, properties)
+
+
+def settings():
+    return SimpleNamespace(
+        workload_resource_group_id=RESOURCE_GROUP_ID.lower(),
+        workload_model_resource_ids=(MODEL_RESOURCE_ID.lower(),),
+        dcr_allocation_stream="Custom-AICostAllocation_CL",
+    )
+
+
+class AllocationServiceTests(unittest.TestCase):
+    def _run(self, state, writer, source=None, usage_query=None):
+        return process_focus_manifests(
+            settings=settings(),
+            source=source or FakeSource(),
+            state_store=state,
+            usage_query=usage_query or FakeUsageQuery(),
+            ingestion_writer=writer,
+            validator=ContractValidator(),
+        )
+
+    def test_partial_multi_batch_upload_replays_with_stable_record_ids(self):
+        state = InMemoryStateStore()
+        writer = FailureWriter(fail_calls={2})
+
+        with patch(
+            "usage_processor.allocation_service.INGESTION_BATCH_SIZE",
+            2,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "simulated upload failure"):
+                self._run(state, writer)
+            result = self._run(state, writer)
+
+        self.assertEqual(result["processed"], 1)
+        records = [
+            row
+            for _, rows in writer.successful
+            for row in rows
+            if row["RecordType"] == "allocation"
+        ]
+        complete = [
+            row
+            for _, rows in writer.successful
+            for row in rows
+            if row["RecordType"] == "run-complete"
+        ]
+        successful_run_id = complete[0]["RunId"]
+        successful_records = [
+            row for row in records if row["RunId"] == successful_run_id
+        ]
+        self.assertEqual(len(successful_records), 4)
+        self.assertEqual(
+            len({row["RecordId"] for row in successful_records}),
+            4,
+        )
+        self.assertEqual(len(complete), 1)
+        self.assertEqual(complete[0]["ExpectedRecordCount"], 4)
+
+    def test_crash_after_upload_replays_and_republishes_completion(self):
+        state = FailAllocatedTransitionOnce()
+        writer = FailureWriter()
+
+        with self.assertRaisesRegex(RuntimeError, "simulated crash after upload"):
+            self._run(state, writer)
+        result = self._run(state, writer)
+
+        self.assertEqual(result["processed"], 1)
+        records = [
+            row
+            for _, rows in writer.successful
+            for row in rows
+            if row["RecordType"] == "allocation"
+        ]
+        markers = [
+            row
+            for _, rows in writer.successful
+            for row in rows
+            if row["RecordType"] == "run-complete"
+        ]
+        self.assertEqual(len(records), 8)
+        self.assertEqual(len({row["RecordId"] for row in records}), 8)
+        self.assertEqual(len(markers), 2)
+        self.assertNotEqual(markers[0]["RunId"], markers[1]["RunId"])
+        self.assertEqual(markers[0]["ExpectedRecordCount"], 4)
+
+    def test_unknown_meter_stays_unallocated_and_preserves_total(self):
+        row = focus_row()
+        row["SkuMeter"] = "Document Intelligence Pages"
+        query = FakeUsageQuery()
+        writer = FailureWriter()
+
+        result = self._run(
+            InMemoryStateStore(),
+            writer,
+            source=FakeSource(row),
+            usage_query=query,
+        )
+
+        self.assertEqual(result["processed"], 1)
+        self.assertEqual(query.calls, 0)
+        allocations = [
+            item
+            for _, rows in writer.successful
+            for item in rows
+            if item["RecordType"] == "allocation"
+            and item["AttributionStatus"] != (
+                "actual-unavailable-at-resource-group-scope"
+            )
+        ]
+        self.assertEqual(len(allocations), 1)
+        self.assertEqual(
+            allocations[0]["AttributionStatus"],
+            "unallocated-unmatched-meter",
+        )
+        self.assertEqual(allocations[0]["UnallocatedBilledCost"], 9.0)
+        self.assertEqual(allocations[0]["UnallocatedEffectiveCost"], 8.0)
+
+    def test_known_meter_on_another_resource_is_not_allocated(self):
+        row = focus_row()
+        row["ResourceId"] = (
+            RESOURCE_GROUP_ID
+            + "/providers/Microsoft.CognitiveServices/accounts/other"
+        )
+        query = FakeUsageQuery()
+        writer = FailureWriter()
+
+        self._run(
+            InMemoryStateStore(),
+            writer,
+            source=FakeSource(row),
+            usage_query=query,
+        )
+
+        self.assertEqual(query.calls, 0)
+        allocations = [
+            item
+            for _, rows in writer.successful
+            for item in rows
+            if item["RecordType"] == "allocation"
+            and item["AttributionStatus"] != (
+                "actual-unavailable-at-resource-group-scope"
+            )
+        ]
+        self.assertEqual(
+            allocations[0]["AttributionStatus"],
+            "unallocated-resource-mismatch",
+        )
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -10,6 +10,13 @@ Use this index to find setup, operation, architecture, demonstration, and design
 | [Architecture](architecture.md) | Review the two resource groups and their data flows. |
 | [Observability and cost management](observability-and-cost-management.md) | Understand telemetry, attribution, cost data, privacy boundaries, and operational gaps. |
 
+## Understand the composition
+
+| Document | Purpose |
+| --- | --- |
+| [Composition and upstreams](composition-and-upstreams.md) | See which parts are vendored, pinned, adapted, or original, why, and which upstream features are omitted. |
+| [Feature catalog](features.md) | Review each feature with its value, view location, permissions, data authority, and current state. |
+
 ## Present the scenarios
 
 | Document | Purpose |

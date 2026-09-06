@@ -1,142 +1,72 @@
 const express = require('express');
-const crypto = require('crypto');
-const msal = require('@azure/msal-node');
 
 const router = express.Router();
 const isProduction = process.env.NODE_ENV === 'production';
-const authStateCookieName = 'ai-observability-demo.auth-state';
+const DEFAULT_RETURN_TO = '/model-comparison';
 
-function getAuthStateCookieOptions() {
-  return {
-    httpOnly: true,
-    secure: true,
-    sameSite: 'none',
-    path: '/auth/callback'
-  };
-}
-
-function isAuthConfigured() {
-  return Boolean(process.env.ENTRA_CLIENT_ID && process.env.ENTRA_TENANT_ID && process.env.ENTRA_CLIENT_SECRET);
-}
-
-function getScopes() {
-  return (process.env.ENTRA_SCOPES || 'User.Read')
-    .split(/[ ,]+/)
-    .map((scope) => scope.trim())
-    .filter(Boolean);
-}
-
-function getRedirectUri(req) {
-  if (process.env.ENTRA_REDIRECT_URI) {
-    return process.env.ENTRA_REDIRECT_URI;
+// Only a single, in-app, same-origin relative path may be used as a post-login redirect
+// target. `startsWith('/')` alone is not sufficient: a value such as "//evil.example" or
+// "/\evil.example" still starts with a single slash but browsers (and some proxies, which
+// normalize backslashes to forward slashes) treat it as a scheme-relative absolute URL to a
+// different host. This check is enforced by this app regardless of any redirect-URI
+// filtering Easy Auth itself performs, rather than relying solely on the platform.
+function isSafeLocalReturnPath(value) {
+  if (typeof value !== 'string' || value.length === 0 || value.length > 2048) {
+    return false;
   }
 
-  return `${req.protocol}://${req.get('host')}/auth/callback`;
-}
-
-function getClient() {
-  return new msal.ConfidentialClientApplication({
-    auth: {
-      clientId: process.env.ENTRA_CLIENT_ID,
-      authority: `https://login.microsoftonline.com/${process.env.ENTRA_TENANT_ID}`,
-      clientSecret: process.env.ENTRA_CLIENT_SECRET
-    }
-  });
-}
-
-router.get('/auth/signin', async (req, res, next) => {
+  let decoded;
   try {
-    if (!isAuthConfigured()) {
-      return res.status(503).render('auth/not-configured', {
-        pageTitle: 'Authentication not configured'
-      });
-    }
-
-    const state = crypto.randomUUID();
-    if (isProduction) {
-      res.cookie(authStateCookieName, state, {
-        ...getAuthStateCookieOptions(),
-        maxAge: 10 * 60 * 1000
-      });
-    } else {
-      req.session.authState = state;
-    }
-
-    const authUrl = await getClient().getAuthCodeUrl({
-      scopes: getScopes(),
-      redirectUri: getRedirectUri(req),
-      state,
-      responseMode: isProduction ? msal.ResponseMode.FORM_POST : msal.ResponseMode.QUERY
-    });
-
-    return res.redirect(authUrl);
-  } catch (err) {
-    return next(err);
+    // Decode first so an encoded backslash/slash (e.g. "%5C", "%2F%2F") can't smuggle a
+    // scheme-relative or backslash-based host past the raw-string checks below.
+    decoded = decodeURIComponent(value);
+  } catch {
+    return false;
   }
+
+  // eslint-disable-next-line no-control-regex
+  if (/[\u0000-\u001f]/.test(decoded)) {
+    return false;
+  }
+  if (decoded.includes('\\')) {
+    return false;
+  }
+  if (!decoded.startsWith('/') || decoded.startsWith('//')) {
+    return false;
+  }
+  // Reject an explicit scheme (e.g. a value containing "javascript:" before any slash);
+  // startsWith('/') already blocks "scheme://host" forms, this guards a bare "/x:y" edge case.
+  if (/^\/[a-z][a-z0-9+.-]*:/i.test(decoded)) {
+    return false;
+  }
+
+  return true;
+}
+
+// Sign-in and sign-out are handled by Azure App Service Authentication ("Easy Auth"), which
+// exposes reserved `/.auth/*` paths at the platform layer, in front of this Node process.
+// These routes only redirect the browser to those platform endpoints; they never see, store
+// or validate a token themselves. See middleware/auth.js for how the resulting authenticated
+// identity is consumed.
+router.get('/auth/signin', (req, res) => {
+  if (!isProduction) {
+    // Easy Auth only exists once the app is deployed behind Azure App Service. There is no
+    // supported local bypass: protected routes cannot be signed into on a developer machine.
+    return res.status(503).render('auth/not-configured', {
+      pageTitle: 'Sign-in is not available in local development'
+    });
+  }
+
+  const returnTo = isSafeLocalReturnPath(req.query.returnTo) ? req.query.returnTo : DEFAULT_RETURN_TO;
+  return res.redirect(`/.auth/login/aad?post_login_redirect_uri=${encodeURIComponent(returnTo)}`);
 });
 
-async function handleAuthCallback(req, res, next) {
-  try {
-    if (!isAuthConfigured()) {
-      return res.status(503).render('auth/not-configured', {
-        pageTitle: 'Authentication not configured'
-      });
-    }
-
-    const response = isProduction ? req.body : req.query;
-    const expectedState = isProduction
-      ? req.cookies[authStateCookieName]
-      : req.session.authState;
-
-    if (!response.code || !expectedState || response.state !== expectedState) {
-      if (isProduction) {
-        res.clearCookie(authStateCookieName, getAuthStateCookieOptions());
-      } else {
-        delete req.session.authState;
-      }
-      return res.status(400).render('error', {
-        pageTitle: 'Sign in failed',
-        message: 'Sign in failed',
-        details: 'The authentication response was invalid. Try signing in again.'
-      });
-    }
-
-    const tokenResponse = await getClient().acquireTokenByCode({
-      code: response.code,
-      scopes: getScopes(),
-      redirectUri: getRedirectUri(req)
-    });
-
-    req.session.account = tokenResponse.account;
-    req.session.accessToken = tokenResponse.accessToken;
-    if (isProduction) {
-      res.clearCookie(authStateCookieName, getAuthStateCookieOptions());
-    } else {
-      delete req.session.authState;
-    }
-
-    const returnTo = req.session.returnTo || '/model-comparison';
-    delete req.session.returnTo;
-    return res.redirect(returnTo);
-  } catch (err) {
-    return next(err);
-  }
-}
-
-if (isProduction) {
-  router.post('/auth/callback', handleAuthCallback);
-} else {
-  router.get('/auth/callback', handleAuthCallback);
-}
-
-router.get('/auth/signout', (req, res, next) => {
-  req.session.destroy((err) => {
-    if (err) {
-      return next(err);
-    }
-
+router.get('/auth/signout', (req, res) => {
+  if (!isProduction) {
     return res.redirect('/');
-  });
+  }
+
+  return res.redirect('/.auth/logout?post_logout_redirect_uri=%2F');
 });
 
 module.exports = router;

@@ -3,6 +3,7 @@ import logging
 import azure.functions as func
 
 from usage_processor.runtime import (
+    run_checkpoint_monitor,
     run_external_claude_context,
     run_focus_allocation,
     run_usage_event_batch,
@@ -23,6 +24,19 @@ LOGGER = logging.getLogger("usage_processor.functions")
 )
 def process_ai_usage(events: list[func.EventHubEvent]):
     run_usage_event_batch(events)
+
+
+@app.function_name(name="MonitorEventHubCheckpoints")
+@app.timer_trigger(
+    arg_name="timer",
+    schedule="0 */5 * * * *",
+    run_on_startup=False,
+    use_monitor=True,
+)
+def monitor_event_hub_checkpoints(timer: func.TimerRequest):
+    if timer.past_due:
+        LOGGER.warning("The checkpoint monitor timer is past due.")
+    run_checkpoint_monitor()
 
 
 @app.function_name(name="AllocateFocusCost")

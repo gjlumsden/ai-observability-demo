@@ -19,6 +19,8 @@ param logAnalyticsWorkspaceId string
 param eventHubNamespaceId string
 
 var cleanSuffix = toLower(replace(resourceSuffix, '-', ''))
+var usageEventHubName = 'ai-usage'
+var usageEventHubConsumerGroupName = 'processor'
 var workloadResourceGroupId = resourceGroup().id
 var foundryResourceId = resourceId(
   'Microsoft.CognitiveServices/accounts',
@@ -155,8 +157,8 @@ resource functionFailureAlert 'Microsoft.Insights/scheduledQueryRules@2023-12-01
           operator: 'GreaterThan'
           threshold: 0
           failingPeriods: {
-            numberOfEvaluationPeriods: 1
-            minFailingPeriodsToAlert: 1
+            numberOfEvaluationPeriods: 3
+            minFailingPeriodsToAlert: 3
           }
         }
       ]
@@ -191,8 +193,8 @@ resource quarantineGrowthAlert 'Microsoft.Insights/scheduledQueryRules@2023-12-0
           operator: 'GreaterThan'
           threshold: 0
           failingPeriods: {
-            numberOfEvaluationPeriods: 1
-            minFailingPeriodsToAlert: 1
+            numberOfEvaluationPeriods: 3
+            minFailingPeriodsToAlert: 3
           }
         }
       ]
@@ -227,8 +229,44 @@ resource ingestionErrorAlert 'Microsoft.Insights/scheduledQueryRules@2023-12-01'
           operator: 'GreaterThan'
           threshold: 0
           failingPeriods: {
-            numberOfEvaluationPeriods: 1
-            minFailingPeriodsToAlert: 1
+            numberOfEvaluationPeriods: 3
+            minFailingPeriodsToAlert: 3
+          }
+        }
+      ]
+    }
+    autoMitigate: true
+    actions: alertActions
+  }
+}
+
+resource checkpointHealthAlert 'Microsoft.Insights/scheduledQueryRules@2023-12-01' = {
+  name: 'ai-observability-checkpoint-health-${cleanSuffix}'
+  location: location
+  tags: tags
+  properties: {
+    displayName: 'AI usage checkpoint health'
+    description: 'Detects partitions whose latest checkpoint status is stale, missing, or invalid while ignoring healthy, lagging, and idle partitions.'
+    severity: 2
+    enabled: true
+    evaluationFrequency: 'PT15M'
+    windowSize: 'PT30M'
+    scopes: [
+      logAnalyticsWorkspaceId
+    ]
+    targetResourceTypes: [
+      'Microsoft.OperationalInsights/workspaces'
+    ]
+    criteria: {
+      allOf: [
+        {
+          query: 'let CheckpointPrefix = "UsageProcessorCheckpointStatus "; let RecentCheckpointStatus = AppTraces | where TimeGenerated > ago(30m) | where AppRoleName == "${functionAppName}" | where Message startswith CheckpointPrefix | extend Checkpoint = parse_json(substring(Message, strlen(CheckpointPrefix))) | extend EventHubName = tostring(Checkpoint.eventHubName), ConsumerGroup = tostring(Checkpoint.consumerGroup), PartitionId = tostring(Checkpoint.partitionId), Status = tolower(tostring(Checkpoint.status)), CheckpointAgeSeconds = todouble(Checkpoint.checkpointAgeSeconds), EventAgeSeconds = todouble(Checkpoint.eventAgeSeconds), CheckpointSequenceNumber = todouble(Checkpoint.checkpointSequenceNumber), LastEnqueuedSequenceNumber = todouble(Checkpoint.lastEnqueuedSequenceNumber), SequenceLag = todouble(Checkpoint.sequenceLag), CheckpointLastModifiedUtc = todatetime(Checkpoint.checkpointLastModifiedUtc), LastEnqueuedTimeUtc = todatetime(Checkpoint.lastEnqueuedTimeUtc), StaleThresholdSeconds = todouble(Checkpoint.staleThresholdSeconds), IdleThresholdSeconds = todouble(Checkpoint.idleThresholdSeconds) | where EventHubName =~ "${usageEventHubName}" and ConsumerGroup =~ "${usageEventHubConsumerGroupName}" | where isnotempty(PartitionId) | summarize arg_max(TimeGenerated, EventHubName, ConsumerGroup, Status, CheckpointAgeSeconds, EventAgeSeconds, CheckpointSequenceNumber, LastEnqueuedSequenceNumber, SequenceLag, CheckpointLastModifiedUtc, LastEnqueuedTimeUtc, StaleThresholdSeconds, IdleThresholdSeconds) by PartitionId; RecentCheckpointStatus | where Status in ("stale", "missing", "invalid") | project EventHubName, ConsumerGroup, PartitionId, Status, CheckpointAgeSeconds, EventAgeSeconds, CheckpointSequenceNumber, LastEnqueuedSequenceNumber, SequenceLag, CheckpointLastModifiedUtc, LastEnqueuedTimeUtc, StaleThresholdSeconds, IdleThresholdSeconds'
+          timeAggregation: 'Count'
+          operator: 'GreaterThan'
+          threshold: 0
+          failingPeriods: {
+            numberOfEvaluationPeriods: 3
+            minFailingPeriodsToAlert: 3
           }
         }
       ]
@@ -264,8 +302,8 @@ resource staleUsageAlert 'Microsoft.Insights/scheduledQueryRules@2023-12-01' = {
           operator: 'GreaterThan'
           threshold: 30
           failingPeriods: {
-            numberOfEvaluationPeriods: 1
-            minFailingPeriodsToAlert: 1
+            numberOfEvaluationPeriods: 2
+            minFailingPeriodsToAlert: 2
           }
         }
       ]
@@ -300,8 +338,8 @@ resource missingRateAlert 'Microsoft.Insights/scheduledQueryRules@2023-12-01' = 
           operator: 'GreaterThan'
           threshold: 0
           failingPeriods: {
-            numberOfEvaluationPeriods: 1
-            minFailingPeriodsToAlert: 1
+            numberOfEvaluationPeriods: 3
+            minFailingPeriodsToAlert: 3
           }
         }
       ]
@@ -317,7 +355,7 @@ resource allocationStaleAlert 'Microsoft.Insights/scheduledQueryRules@2023-12-01
   tags: tags
   properties: {
     displayName: 'FinOps FOCUS allocation data is stale'
-    description: 'Detects more than 36 hours without a successful allocation record.'
+    description: 'Detects more than 36 hours without a verified completed allocation run for this workload scope.'
     severity: 2
     enabled: true
     evaluationFrequency: 'PT1H'
@@ -331,14 +369,14 @@ resource allocationStaleAlert 'Microsoft.Insights/scheduledQueryRules@2023-12-01
     criteria: {
       allOf: [
         {
-          query: 'union (AICostAllocation_CL | where SourceScope =~ "${workloadResourceGroupId}" and IncludedInWorkloadTotal == true | summarize LastSeen=max(TimeGenerated)), (print LastSeen=datetime(1970-01-01)) | summarize LastSeen=max(LastSeen) | extend AgeHours=datetime_diff("hour", now(), LastSeen) | project AgeHours'
+          query: 'let AllocationRows = materialize(AICostAllocation_CL | where RecordType == "allocation" | summarize arg_max(TimeGenerated, *) by RunId, RecordId); let CompleteRuns = AICostAllocation_CL | where RecordType == "run-complete" | summarize arg_max(TimeGenerated, *) by RunId | join kind=inner (AllocationRows | summarize ActualRecordCount = count() by RunId) on RunId | where ActualRecordCount == ExpectedRecordCount; let ScopedCompleteRuns = CompleteRuns | where SourceScope =~ "${workloadResourceGroupId}" | summarize arg_max(TimeGenerated, *) by SourceType, SourceScope, SourcePath; union (ScopedCompleteRuns | summarize LastSeen=max(TimeGenerated)), (print LastSeen=datetime(1970-01-01)) | summarize LastSeen=max(LastSeen) | extend AgeHours=datetime_diff("hour", now(), LastSeen) | project AgeHours'
           metricMeasureColumn: 'AgeHours'
           timeAggregation: 'Maximum'
           operator: 'GreaterThan'
           threshold: 36
           failingPeriods: {
-            numberOfEvaluationPeriods: 1
-            minFailingPeriodsToAlert: 1
+            numberOfEvaluationPeriods: 2
+            minFailingPeriodsToAlert: 2
           }
         }
       ]
@@ -354,7 +392,7 @@ resource reconciliationDriftAlert 'Microsoft.Insights/scheduledQueryRules@2023-1
   tags: tags
   properties: {
     displayName: 'AI cost allocation reconciliation drift'
-    description: 'Detects allocation runs whose allocated and unallocated values do not match the source cost.'
+    description: 'Detects the latest verified allocation run whose allocated and unallocated values do not match the source cost.'
     severity: 1
     enabled: true
     evaluationFrequency: 'PT30M'
@@ -368,13 +406,13 @@ resource reconciliationDriftAlert 'Microsoft.Insights/scheduledQueryRules@2023-1
     criteria: {
       allOf: [
         {
-          query: 'let ScopedRows = AICostAllocation_CL | where SourceScope =~ "${workloadResourceGroupId}" and IncludedInWorkloadTotal == true; let LatestRuns = ScopedRows | summarize arg_max(TimeGenerated, RunId) by SourcePath | project SourcePath, RunId; LatestRuns | join kind=inner (ScopedRows) on SourcePath, RunId | where TimeGenerated > ago(1h) | summarize SourceBilledCost=take_any(SourceBilledCost), SourceEffectiveCost=take_any(SourceEffectiveCost), AllocatedBilledCost=sum(AllocatedBilledCost), AllocatedEffectiveCost=sum(AllocatedEffectiveCost), UnallocatedBilledCost=sum(UnallocatedBilledCost), UnallocatedEffectiveCost=sum(UnallocatedEffectiveCost) by RunId, SourcePath, SourceETag, ChargePeriodStart, ChargePeriodEnd, Provider, MeterId, MeterName, ResourceId | where (isnotnull(SourceBilledCost) and abs(SourceBilledCost-AllocatedBilledCost-UnallocatedBilledCost) > 0.01) or (isnotnull(SourceEffectiveCost) and abs(SourceEffectiveCost-AllocatedEffectiveCost-UnallocatedEffectiveCost) > 0.01)'
+          query: 'let AllocationRows = materialize(AICostAllocation_CL | where RecordType == "allocation" | summarize arg_max(TimeGenerated, *) by RunId, RecordId); let CompleteRuns = AICostAllocation_CL | where RecordType == "run-complete" | summarize arg_max(TimeGenerated, *) by RunId | join kind=inner (AllocationRows | summarize ActualRecordCount = count() by RunId) on RunId | where ActualRecordCount == ExpectedRecordCount; let LatestRuns = CompleteRuns | where SourceScope =~ "${workloadResourceGroupId}" | summarize arg_max(TimeGenerated, *) by SourceType, SourceScope, SourcePath | project RunId, CompletionTime = TimeGenerated; LatestRuns | where CompletionTime > ago(1h) | join kind=inner (AllocationRows | where IncludedInWorkloadTotal == true) on RunId | summarize SourceBilledCost=take_any(SourceBilledCost), SourceEffectiveCost=take_any(SourceEffectiveCost), AllocatedBilledCost=sum(AllocatedBilledCost), AllocatedEffectiveCost=sum(AllocatedEffectiveCost), UnallocatedBilledCost=sum(UnallocatedBilledCost), UnallocatedEffectiveCost=sum(UnallocatedEffectiveCost) by RunId, SourcePath, SourceETag, ChargePeriodStart, ChargePeriodEnd, Provider, MeterId, MeterName, ResourceId | where (isnotnull(SourceBilledCost) and abs(SourceBilledCost-AllocatedBilledCost-UnallocatedBilledCost) > 0.01) or (isnotnull(SourceEffectiveCost) and abs(SourceEffectiveCost-AllocatedEffectiveCost-UnallocatedEffectiveCost) > 0.01)'
           timeAggregation: 'Count'
           operator: 'GreaterThan'
           threshold: 0
           failingPeriods: {
-            numberOfEvaluationPeriods: 1
-            minFailingPeriodsToAlert: 1
+            numberOfEvaluationPeriods: 3
+            minFailingPeriodsToAlert: 3
           }
         }
       ]
