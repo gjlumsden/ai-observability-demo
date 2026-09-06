@@ -19,6 +19,8 @@
 // Treat the provider token as expired this far before its actual expiry time (seconds).
 // This buffer avoids race conditions where the token expires mid-request.
 // See: https://learn.microsoft.com/azure/app-service/configure-authentication-oauth-tokens
+const isProduction = process.env.NODE_ENV === 'production';
+
 const PROVIDER_TOKEN_REFRESH_BUFFER_S = 60;
 
 // Any plausible future token expiry exceeds this Unix epoch value (2001-09-09).
@@ -64,6 +66,10 @@ function isProviderTokenExpired(expiresAt) {
 }
 
 function getEasyAuthPrincipal(req) {
+  if (!isProduction) {
+    return null;
+  }
+
   const principalId = req.headers['x-ms-client-principal-id'];
   if (!principalId) {
     return null;

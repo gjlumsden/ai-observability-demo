@@ -15,6 +15,30 @@
 
 const assert = require('node:assert/strict');
 
+process.env.NODE_ENV = 'production';
+
+function requireAuthForNodeEnv(nodeEnv) {
+  const authPath = require.resolve('../middleware/auth');
+  delete require.cache[authPath];
+
+  const previousNodeEnv = process.env.NODE_ENV;
+  if (nodeEnv === undefined) {
+    delete process.env.NODE_ENV;
+  } else {
+    process.env.NODE_ENV = nodeEnv;
+  }
+
+  const auth = require('../middleware/auth');
+
+  if (previousNodeEnv === undefined) {
+    delete process.env.NODE_ENV;
+  } else {
+    process.env.NODE_ENV = previousNodeEnv;
+  }
+
+  return auth;
+}
+
 // ---------------------------------------------------------------------------
 // (1) parseProviderTokenExpiry
 // ---------------------------------------------------------------------------
@@ -77,8 +101,28 @@ assert.equal(isProviderTokenExpired(nowS - 1), true,        '2: past → true');
 console.log('(2) isProviderTokenExpired pure-function tests passed.');
 
 // ---------------------------------------------------------------------------
-// Set production mode before requiring app (isProduction flag in auth/routes)
+// Non-production/default mode must ignore spoofed Easy Auth headers.
 // ---------------------------------------------------------------------------
+{
+  const { readAuth } = requireAuthForNodeEnv(undefined);
+  const req = {
+    headers: {
+      'x-ms-client-principal-id': 'spoofed-user-id',
+      'x-ms-client-principal-name': 'spoofed@example.invalid',
+      'x-ms-token-aad-access-token': 'spoofed-downstream-token',
+      'x-ms-token-aad-expires-on': freshNumeric
+    }
+  };
+  let nextCalled = false;
+  readAuth(req, {}, () => {
+    nextCalled = true;
+  });
+  assert.equal(req.user, null, 'non-production must not populate req.user from spoofed headers');
+  assert.equal(nextCalled, true, 'non-production must continue to the next middleware');
+}
+
+// Restore the production load before requiring app (isProduction flag in auth/routes).
+delete require.cache[require.resolve('../middleware/auth')];
 process.env.NODE_ENV = 'production';
 const app = require('../app');
 
