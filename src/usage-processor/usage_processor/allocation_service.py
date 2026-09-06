@@ -19,6 +19,8 @@ from .focus import (
 
 LOGGER = logging.getLogger("usage_processor.allocation")
 INGESTION_BATCH_SIZE = 500
+EXTERNAL_QUERY_SOURCE_TYPE = "cost-management-query"
+EXTERNAL_QUERY_SOURCE_SCOPE = "subscription"
 
 
 def process_focus_manifests(
@@ -165,12 +167,12 @@ def process_external_claude_context(
     validator,
 ):
     costs = cost_query.query_claude_ccu(start, end)
-    source_etag = external_result_etag(costs)
-    source_path = (
-        f"/subscriptions/{settings.subscription_id}"
-        "/providers/Microsoft.CostManagement/query"
-        f"?api-version=2026-06-01&from={start.date()}&to={end.date()}"
+    source_etag = external_result_etag(
+        costs,
+        query_start=start,
+        query_end=end,
     )
+    source_path = external_cost_source_path(settings.subscription_id)
     claim = state_store.claim_cost(
         source_path,
         source_etag,
@@ -180,7 +182,7 @@ def process_external_claude_context(
         return {"processed": 0, "rows": 0, "duplicate": True}
     attempt = int(claim.properties.get("Attempt") or 0) + 1
     run_id = _run_id(
-        "cost-management-query",
+        EXTERNAL_QUERY_SOURCE_TYPE,
         source_path,
         source_etag,
         attempt,
@@ -210,8 +212,8 @@ def process_external_claude_context(
     )
     completion = build_run_complete_row(
         run_id=run_id,
-        source_type="cost-management-query",
-        source_scope="subscription",
+        source_type=EXTERNAL_QUERY_SOURCE_TYPE,
+        source_scope=EXTERNAL_QUERY_SOURCE_SCOPE,
         source_path=source_path,
         source_etag=source_etag,
         expected_record_count=len(rows),
@@ -229,6 +231,14 @@ def default_external_query_range(now=None):
         current.date(), datetime.min.time(), tzinfo=timezone.utc
     )
     return end - timedelta(days=7), end
+
+
+def external_cost_source_path(subscription_id):
+    return (
+        f"/subscriptions/{subscription_id}"
+        "/providers/Microsoft.CostManagement/query"
+        "?api-version=2026-06-01&view=claude-ccu-daily-snapshot"
+    )
 
 
 def _month_range(year, month):

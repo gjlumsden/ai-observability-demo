@@ -246,6 +246,10 @@ function Test-PostprovisionAuthContracts {
     Assert-True (
         $postprovision.Contains('identityProviders.azureActiveDirectory.validation.defaultAuthorizationPolicy.allowedApplications[0]=$($app.appId)')
     ) 'The postprovision hook must restrict allowedApplications to the configured client application identity explicitly.'
+    Assert-True (
+        $postprovision.Contains('api = @{') -and
+        $postprovision.Contains('requestedAccessTokenVersion = 2')
+    ) 'The postprovision hook must set api.requestedAccessTokenVersion to 2 in the Graph app patch payload.'
 
     Write-Host 'Validated postprovision Easy Auth integration contracts.'
 }

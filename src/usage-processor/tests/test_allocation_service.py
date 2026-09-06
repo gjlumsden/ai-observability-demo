@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from types import SimpleNamespace
 import unittest
@@ -7,7 +7,12 @@ from unittest.mock import patch
 import bootstrap  # noqa: F401
 
 from usage_processor.allocation import UsageWeight
-from usage_processor.allocation_service import process_focus_manifests
+from usage_processor.allocation_service import (
+    default_external_query_range,
+    process_external_claude_context,
+    process_focus_manifests,
+)
+from usage_processor.cost_context import ExternalCost
 from usage_processor.focus import FocusManifest
 from usage_processor.state import InMemoryStateStore
 from usage_processor.validation import ContractValidator
@@ -67,6 +72,18 @@ class FakeUsageQuery:
         ]
 
 
+class FakeCostQuery:
+    def __init__(self, snapshots):
+        self.snapshots = list(snapshots)
+        self.calls = []
+
+    def query_claude_ccu(self, start, end):
+        self.calls.append((start, end))
+        if not self.snapshots:
+            raise AssertionError("Unexpected external cost query call.")
+        return list(self.snapshots.pop(0))
+
+
 class FailureWriter:
     def __init__(self, fail_calls=()):
         self.fail_calls = set(fail_calls)
@@ -94,9 +111,21 @@ class FailAllocatedTransitionOnce(InMemoryStateStore):
 
 def settings():
     return SimpleNamespace(
+        subscription_id=SUBSCRIPTION_ID,
         workload_resource_group_id=RESOURCE_GROUP_ID.lower(),
         workload_model_resource_ids=(MODEL_RESOURCE_ID.lower(),),
         dcr_allocation_stream="Custom-AICostAllocation_CL",
+    )
+
+
+def external_cost(usage_day, billed_cost):
+    return ExternalCost(
+        usage_date=date.fromisoformat(usage_day),
+        publisher_name="Anthropic",
+        publisher_type="Marketplace",
+        meter_name="Claude Consumption Unit",
+        currency="USD",
+        billed_cost=Decimal(str(billed_cost)),
     )
 
 
@@ -237,6 +266,231 @@ class AllocationServiceTests(unittest.TestCase):
             allocations[0]["AttributionStatus"],
             "unallocated-resource-mismatch",
         )
+
+    def test_external_context_uses_stable_identity_for_adjacent_windows(self):
+        state = InMemoryStateStore()
+        writer = FailureWriter()
+        cost_query = FakeCostQuery(
+            [
+                [
+                    external_cost("2026-08-06", "10"),
+                    external_cost("2026-08-07", "11"),
+                ],
+                [
+                    external_cost("2026-08-07", "12"),
+                    external_cost("2026-08-08", "13"),
+                ],
+            ]
+        )
+        first_start = datetime(2026, 8, 1, tzinfo=timezone.utc)
+        first_end = datetime(2026, 8, 8, tzinfo=timezone.utc)
+        second_start = datetime(2026, 8, 2, tzinfo=timezone.utc)
+        second_end = datetime(2026, 8, 9, tzinfo=timezone.utc)
+
+        first = process_external_claude_context(
+            settings=settings(),
+            start=first_start,
+            end=first_end,
+            cost_query=cost_query,
+            state_store=state,
+            ingestion_writer=writer,
+            validator=ContractValidator(),
+        )
+        second = process_external_claude_context(
+            settings=settings(),
+            start=second_start,
+            end=second_end,
+            cost_query=cost_query,
+            state_store=state,
+            ingestion_writer=writer,
+            validator=ContractValidator(),
+        )
+
+        self.assertEqual(first, {"processed": 1, "rows": 2, "duplicate": False})
+        self.assertEqual(second, {"processed": 1, "rows": 2, "duplicate": False})
+        self.assertEqual(
+            cost_query.calls,
+            [(first_start, first_end), (second_start, second_end)],
+        )
+        completion_rows = [
+            row
+            for _, rows in writer.successful
+            for row in rows
+            if row["RecordType"] == "run-complete"
+        ]
+        self.assertEqual(len(completion_rows), 2)
+        self.assertEqual(
+            completion_rows[0]["SourcePath"],
+            completion_rows[1]["SourcePath"],
+        )
+        self.assertNotIn("from=", completion_rows[0]["SourcePath"])
+        self.assertNotIn("to=", completion_rows[0]["SourcePath"])
+
+        first_run_id = completion_rows[0]["RunId"]
+        second_run_id = completion_rows[1]["RunId"]
+        allocation_rows = [
+            row
+            for _, rows in writer.successful
+            for row in rows
+            if row["RecordType"] == "allocation"
+        ]
+        first_revised_day = next(
+            row
+            for row in allocation_rows
+            if row["RunId"] == first_run_id
+            and row["ChargePeriodStart"].startswith("2026-08-07")
+        )
+        second_revised_day = next(
+            row
+            for row in allocation_rows
+            if row["RunId"] == second_run_id
+            and row["ChargePeriodStart"].startswith("2026-08-07")
+        )
+        self.assertEqual(first_revised_day["SourceBilledCost"], 11.0)
+        self.assertEqual(second_revised_day["SourceBilledCost"], 12.0)
+
+    def test_external_context_skips_repeated_snapshot(self):
+        state = InMemoryStateStore()
+        writer = FailureWriter()
+        snapshot = [external_cost("2026-08-07", "11")]
+        cost_query = FakeCostQuery([snapshot, snapshot])
+        start = datetime(2026, 8, 2, tzinfo=timezone.utc)
+        end = datetime(2026, 8, 9, tzinfo=timezone.utc)
+
+        first = process_external_claude_context(
+            settings=settings(),
+            start=start,
+            end=end,
+            cost_query=cost_query,
+            state_store=state,
+            ingestion_writer=writer,
+            validator=ContractValidator(),
+        )
+        second = process_external_claude_context(
+            settings=settings(),
+            start=start,
+            end=end,
+            cost_query=cost_query,
+            state_store=state,
+            ingestion_writer=writer,
+            validator=ContractValidator(),
+        )
+
+        self.assertEqual(first, {"processed": 1, "rows": 1, "duplicate": False})
+        self.assertEqual(second, {"processed": 0, "rows": 0, "duplicate": True})
+        completion_rows = [
+            row
+            for _, rows in writer.successful
+            for row in rows
+            if row["RecordType"] == "run-complete"
+        ]
+        allocation_rows = [
+            row
+            for _, rows in writer.successful
+            for row in rows
+            if row["RecordType"] == "allocation"
+        ]
+        self.assertEqual(len(completion_rows), 1)
+        self.assertEqual(len(allocation_rows), 1)
+
+    def test_external_context_processes_shifted_window_with_same_rows(self):
+        state = InMemoryStateStore()
+        writer = FailureWriter()
+        snapshot = [external_cost("2026-08-07", "11")]
+        cost_query = FakeCostQuery([snapshot, snapshot])
+
+        first = process_external_claude_context(
+            settings=settings(),
+            start=datetime(2026, 8, 2, tzinfo=timezone.utc),
+            end=datetime(2026, 8, 9, tzinfo=timezone.utc),
+            cost_query=cost_query,
+            state_store=state,
+            ingestion_writer=writer,
+            validator=ContractValidator(),
+        )
+        second = process_external_claude_context(
+            settings=settings(),
+            start=datetime(2026, 8, 3, tzinfo=timezone.utc),
+            end=datetime(2026, 8, 10, tzinfo=timezone.utc),
+            cost_query=cost_query,
+            state_store=state,
+            ingestion_writer=writer,
+            validator=ContractValidator(),
+        )
+
+        self.assertEqual(first, {"processed": 1, "rows": 1, "duplicate": False})
+        self.assertEqual(second, {"processed": 1, "rows": 1, "duplicate": False})
+        completion_rows = [
+            row
+            for _, rows in writer.successful
+            for row in rows
+            if row["RecordType"] == "run-complete"
+        ]
+        self.assertEqual(len(completion_rows), 2)
+        self.assertEqual(
+            completion_rows[0]["SourcePath"],
+            completion_rows[1]["SourcePath"],
+        )
+        self.assertNotEqual(
+            completion_rows[0]["SourceETag"],
+            completion_rows[1]["SourceETag"],
+        )
+
+    def test_external_context_records_empty_snapshot_as_complete_run(self):
+        state = InMemoryStateStore()
+        writer = FailureWriter()
+        cost_query = FakeCostQuery(
+            [
+                [external_cost("2026-08-07", "11")],
+                [],
+            ]
+        )
+
+        first = process_external_claude_context(
+            settings=settings(),
+            start=datetime(2026, 8, 2, tzinfo=timezone.utc),
+            end=datetime(2026, 8, 9, tzinfo=timezone.utc),
+            cost_query=cost_query,
+            state_store=state,
+            ingestion_writer=writer,
+            validator=ContractValidator(),
+        )
+        second = process_external_claude_context(
+            settings=settings(),
+            start=datetime(2026, 8, 3, tzinfo=timezone.utc),
+            end=datetime(2026, 8, 10, tzinfo=timezone.utc),
+            cost_query=cost_query,
+            state_store=state,
+            ingestion_writer=writer,
+            validator=ContractValidator(),
+        )
+
+        self.assertEqual(first, {"processed": 1, "rows": 1, "duplicate": False})
+        self.assertEqual(second, {"processed": 1, "rows": 0, "duplicate": False})
+        completion_rows = [
+            row
+            for _, rows in writer.successful
+            for row in rows
+            if row["RecordType"] == "run-complete"
+        ]
+        self.assertEqual(len(completion_rows), 2)
+        self.assertEqual(completion_rows[1]["ExpectedRecordCount"], 0)
+        empty_run_id = completion_rows[1]["RunId"]
+        second_run_rows = [
+            row
+            for _, rows in writer.successful
+            for row in rows
+            if row["RecordType"] == "allocation" and row["RunId"] == empty_run_id
+        ]
+        self.assertEqual(second_run_rows, [])
+
+    def test_default_external_query_range_is_a_rolling_seven_day_window(self):
+        start, end = default_external_query_range(
+            datetime(2026, 9, 6, 21, 3, 15, tzinfo=timezone.utc)
+        )
+
+        self.assertEqual(end, datetime(2026, 9, 6, tzinfo=timezone.utc))
+        self.assertEqual(start, datetime(2026, 8, 30, tzinfo=timezone.utc))
 
 
 if __name__ == "__main__":

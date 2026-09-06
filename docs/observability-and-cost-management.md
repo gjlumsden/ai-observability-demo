@@ -79,6 +79,8 @@ Claude CCU meters. These records use:
 The subscription value can include other workloads. It is excluded from every
 demo total. The processor never uses it as an allocation fallback, weight, or
 denominator.
+External context reporting uses the latest verified rolling seven-day snapshot.
+It is not a cumulative sum across historical overlapping query windows.
 
 ## Metric and structured-event split
 

@@ -119,26 +119,30 @@ def select_exact_claude_ccu(result):
     return matches
 
 
-def external_result_etag(costs):
-    content = [
-        {
-            "date": item.usage_date.isoformat(),
-            "publisher": item.publisher_name,
-            "publisherType": item.publisher_type,
-            "meter": item.meter_name,
-            "currency": item.currency,
-            "billedCost": str(item.billed_cost),
-        }
-        for item in sorted(
-            costs,
-            key=lambda item: (
-                item.usage_date,
-                item.currency,
-                item.publisher_name,
-                item.meter_name,
-            ),
-        )
-    ]
+def external_result_etag(costs, *, query_start=None, query_end=None):
+    content = {
+        "queryStart": _etag_boundary(query_start),
+        "queryEnd": _etag_boundary(query_end),
+        "rows": [
+            {
+                "date": item.usage_date.isoformat(),
+                "publisher": item.publisher_name,
+                "publisherType": item.publisher_type,
+                "meter": item.meter_name,
+                "currency": item.currency,
+                "billedCost": str(item.billed_cost),
+            }
+            for item in sorted(
+                costs,
+                key=lambda item: (
+                    item.usage_date,
+                    item.currency,
+                    item.publisher_name,
+                    item.meter_name,
+                ),
+            )
+        ],
+    }
     encoded = json.dumps(content, separators=(",", ":"), sort_keys=True).encode(
         "utf-8"
     )
@@ -212,3 +216,15 @@ def _usage_date(value):
     if text.isdigit() and len(text) == 8:
         return datetime.strptime(text, "%Y%m%d").date()
     return datetime.fromisoformat(text.replace("Z", "+00:00")).date()
+
+
+def _etag_boundary(value):
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc).isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    return str(value)

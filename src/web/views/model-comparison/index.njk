@@ -51,6 +51,7 @@
 {% endblock %}
 
 {% block pageScripts %}
+<script src="/easy-auth-refresh.js"></script>
 <script nonce="{{ cspNonce }}">
   const form = document.getElementById('comparison-form');
   const resultsPanel = document.getElementById('results-panel');
@@ -121,11 +122,18 @@
     resultsPanel.hidden = false;
     results.textContent = 'Running both models...';
 
-    const response = await fetch(form.action, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt: promptInput.value })
-    });
+    let response;
+    try {
+      response = await fetchWithTokenRefresh(form.action, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: promptInput.value })
+      });
+    } catch (err) {
+      resultsPanel.hidden = true;
+      showError(err.message || 'The comparison could not be completed. Please try again.');
+      return;
+    }
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) {
       resultsPanel.hidden = true;

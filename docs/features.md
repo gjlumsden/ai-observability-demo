@@ -88,16 +88,22 @@ live environment.
   paths, the APIM access-token audience, the weather Model Context Protocol (MCP)
   machine-to-machine route protection, and the health endpoint. The design does
   not disable token validation.
+- Token renewal: the app detects an expired provider token before calling APIM.
+  The browser calls the platform `/.auth/refresh` endpoint and retries the action
+  once. Failed renewal stops the action and shows an error. The app does not add
+  custom OAuth handling or token storage.
 - Predeployment (done): the code migration to Easy Auth, the `authsettingsV2`
   identity-provider configuration, `returnTo` redirect sanitization, and the
-  trust-boundary tests. Platform settings (names only, values deployment-specific):
+  trust-boundary tests. Platform app settings (names only, values deployment-specific):
   `WEBSITE_AAD_ENABLE_MISE=true`, `MICROSOFT_PROVIDER_AUTHENTICATION_SECRET`,
-  `ENTRA_CLIENT_ID`, `ENTRA_TENANT_ID`. Easy Auth activates when the postprovision
-  hook populates the Entra client ID.
+  plus the identity-provider properties in `authsettingsV2`. The postprovision hook
+  sets the real client ID and requests v2 access tokens. The `ENTRA_CLIENT_ID` and
+  `ENTRA_TENANT_ID` app settings are metadata, not automatic provider configuration.
 - Test boundary: the predeployment tests (`npm run test:auth-validation`,
   `npm run test:auth-logging`) exercise this app's responsibility only. They deny a
   request with no forwarded identity header, accept a request that carries one, and
-  sanitize the post-login redirect target. They do not verify token signature,
+  sanitize the post-login redirect target, and exercise renewal request handling.
+  They do not verify token signature,
   issuer, audience, or lifetime. The platform validates those.
 - Postdeployment: four steps confirm compliance in a deployed environment.
   (1) Deploy the pipeline. (2) Run the separate token-acceptance harness,

@@ -11,7 +11,7 @@ const {
   protectedCodeDirectSample
 } = require('../lib/scenario-prompts');
 const { trackGuardrailDecision } = require('../lib/telemetry');
-const { requireAuth } = require('../middleware/auth');
+const { requireAuth, requireFreshProviderToken } = require('../middleware/auth');
 
 const router = express.Router();
 const MAX_PROMPT_LENGTH = 6000;
@@ -73,7 +73,7 @@ router.get('/scientific-code-explainer', requireAuth, (req, res) => {
   });
 });
 
-router.post('/scientific-code-explainer/explain', requireAuth, async (req, res, next) => {
+router.post('/scientific-code-explainer/explain', requireAuth, requireFreshProviderToken, async (req, res, next) => {
   const correlationId = crypto.randomUUID();
   let sampleKind = 'normal';
   try {
@@ -211,7 +211,7 @@ router.post('/scientific-code-explainer/explain', requireAuth, async (req, res, 
   }
 });
 
-router.post('/scientific-code-explainer/check-protected-code', requireAuth, async (req, res, next) => {
+router.post('/scientific-code-explainer/check-protected-code', requireAuth, requireFreshProviderToken, async (req, res, next) => {
   const correlationId = crypto.randomUUID();
   try {
     const code = (req.body.code || '').trim();

@@ -40,8 +40,16 @@ or verify token signatures, issuers, audiences, or lifetimes. The platform valid
 those. Protected routes cannot be exercised on a local development machine. The local
 sign-in page states this.
 
+Provider access tokens can expire before the App Service session. Before a
+downstream call, the app uses the platform expiry header to detect that condition.
+The browser then calls `/.auth/refresh` with its existing session and retries the
+action once. A failed refresh stops the action and shows an error. The app does not
+implement an OAuth exchange or persist provider tokens.
+See [App Service token renewal](https://learn.microsoft.com/azure/app-service/configure-authentication-oauth-tokens).
+
 The predeployment tests (`npm run test:auth-validation`, `npm run test:auth-logging`)
-cover only the forwarded-identity trust boundary and the redirect sanitization. A
+cover the forwarded-identity boundary, redirect sanitization, and token-renewal
+request handling. They do not prove deployed token cryptography. A
 separate postdeployment harness, `npm run postdeploy:auth-acceptance`, verifies token
 acceptance against a deployed instance. It requires `EASYAUTH_ACCEPTANCE_BASE_URL` (an
 `https` origin with no credentials, query, or fragment) and all five
@@ -62,12 +70,20 @@ App-code settings:
 - `APIM_BASE_URL` - base URL for API Management
 - `APIM_PRESENTER_KEY` - governed model scenarios APIM subscription key
 
-Platform authentication settings (App Service reads these; app code does not):
+Platform authentication app settings:
 
 - `WEBSITE_AAD_ENABLE_MISE` - set to `true` to enable the platform MISE token-validation engine
-- `ENTRA_TENANT_ID` - Entra tenant. Configures the Easy Auth issuer
-- `ENTRA_CLIENT_ID` - Entra client. Configures the Easy Auth registration and the `access_as_user` scope
 - `MICROSOFT_PROVIDER_AUTHENTICATION_SECRET` - Easy Auth Entra client-secret setting name. The value is deployment-specific and is not published
+
+The Bicep template and postprovision hook configure the client ID, issuer, audiences,
+and delegated scope in `authsettingsV2`. The hook requests v2 access tokens through
+`api.requestedAccessTokenVersion = 2`.
+
+The hook also records `ENTRA_CLIENT_ID` and `ENTRA_TENANT_ID` in App Service settings.
+Those copies are deployment metadata, not settings that Express or Easy Auth reads
+automatically. Changing them alone does not update the identity provider.
+The separate `ENTRA_CLIENT_ID` value in the azd environment selects the registration
+that the provisioning hook reuses.
 
 App Service Authentication replaces the previous library sign-in. The app no
 longer reads `SESSION_SECRET`, `ENTRA_CLIENT_SECRET`, `ENTRA_REDIRECT_URI`, or

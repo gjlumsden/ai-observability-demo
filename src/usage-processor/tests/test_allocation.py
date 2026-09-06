@@ -12,6 +12,7 @@ from usage_processor.allocation import (
     unavailable_claude_row,
 )
 from usage_processor.cost_context import (
+    ExternalCost,
     build_external_rows,
     external_result_etag,
     select_exact_claude_ccu,
@@ -254,6 +255,29 @@ class ExternalContextTests(unittest.TestCase):
         self.assertIsNone(rows[0]["SubjectId"])
         self.assertIsNone(rows[0]["AllocatedBilledCost"])
         ContractValidator().validate_allocation(rows[0])
+
+    def test_external_etag_changes_when_query_window_changes(self):
+        costs = [
+            ExternalCost(
+                usage_date=date(2026, 8, 28),
+                publisher_name="Anthropic",
+                publisher_type="Marketplace",
+                meter_name="Claude Consumption Unit",
+                currency="USD",
+                billed_cost=Decimal("10"),
+            )
+        ]
+        first = external_result_etag(
+            costs,
+            query_start=datetime(2026, 8, 21, tzinfo=timezone.utc),
+            query_end=datetime(2026, 8, 28, tzinfo=timezone.utc),
+        )
+        second = external_result_etag(
+            costs,
+            query_start=datetime(2026, 8, 22, tzinfo=timezone.utc),
+            query_end=datetime(2026, 8, 29, tzinfo=timezone.utc),
+        )
+        self.assertNotEqual(first, second)
 
 
 if __name__ == "__main__":

@@ -198,6 +198,7 @@ Invoke-Az 'Entra identifier URI' @(
 
 $scopeBody = @{
     api = @{
+        requestedAccessTokenVersion = 2
         oauth2PermissionScopes = @(
             @{
                 adminConsentDescription = 'Access the AI Observability Demo as the signed-in user.'
