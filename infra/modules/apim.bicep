@@ -100,6 +100,26 @@ resource entraClientIdNamedValue 'Microsoft.ApiManagement/service/namedValues@20
   }
 }
 
+resource usageResourceGroupIdNamedValue 'Microsoft.ApiManagement/service/namedValues@2024-05-01' = {
+  parent: apim
+  name: 'usage-resource-group-id'
+  properties: {
+    displayName: 'usage-resource-group-id'
+    value: resourceGroup().id
+    secret: false
+  }
+}
+
+resource usageModelResourceIdNamedValue 'Microsoft.ApiManagement/service/namedValues@2024-05-01' = {
+  parent: apim
+  name: 'usage-model-resource-id'
+  properties: {
+    displayName: 'usage-model-resource-id'
+    value: resourceId('Microsoft.CognitiveServices/accounts', foundryAccountName)
+    secret: false
+  }
+}
+
 resource appInsightsLogger 'Microsoft.ApiManagement/service/loggers@2023-09-01-preview' = {
   parent: apim
   name: 'applicationinsights'

@@ -119,6 +119,15 @@ foreach ($relativePath in $policyPaths) {
     Assert-True ($subjectExpression.Contains('{{usage-hmac-key}}')) "The HMAC key reference is missing in $relativePath."
     Assert-True ($subjectExpression.Contains("TrimEnd('=').Replace('+', '-').Replace('/', '_')")) "The subject pseudonym is not base64url encoded in $relativePath."
 
+    $resourceGroupVariable = $policy.SelectSingleNode("//set-variable[@name='resource-group-id']")
+    $modelResourceVariable = $policy.SelectSingleNode("//set-variable[@name='model-resource-id']")
+    Assert-True (
+        $resourceGroupVariable.GetAttribute('value') -eq '{{usage-resource-group-id}}'
+    ) "The usage resource-group ID does not use its deployment value in $relativePath."
+    Assert-True (
+        $modelResourceVariable.GetAttribute('value') -eq '{{usage-model-resource-id}}'
+    ) "The usage model-resource ID does not use its deployment value in $relativePath."
+
     $logs = @($policy.SelectNodes('//log-to-eventhub'))
     Assert-True ($logs.Count -ge 2) "Expected outbound and error Event Hubs logging in $relativePath."
     foreach ($log in $logs) {

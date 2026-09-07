@@ -14,20 +14,8 @@
     </choose>
     <set-variable name="attribution-team" value="Agents" />
     <set-variable name="attribution-mode" value="agent" />
-    <set-variable name="resource-group-id" value="@{
-      var serviceId = context.Deployment.ServiceId ?? string.Empty;
-      var markerIndex = serviceId.ToLowerInvariant().IndexOf(&quot;/providers/&quot;);
-      return markerIndex &gt; 0 ? serviceId.Substring(0, markerIndex) : string.Empty;
-    }" />
-    <set-variable name="model-resource-id" value="@{
-      var resourceGroupId = (string)context.Variables[&quot;resource-group-id&quot;];
-      var host = context.Api.ServiceUrl == null ? string.Empty : context.Api.ServiceUrl.Host;
-      var dotIndex = host.IndexOf(&quot;.&quot;);
-      var accountName = dotIndex &gt; 0 ? host.Substring(0, dotIndex) : host;
-      return string.IsNullOrEmpty(resourceGroupId) || string.IsNullOrEmpty(accountName)
-        ? string.Empty
-        : resourceGroupId + &quot;/providers/Microsoft.CognitiveServices/accounts/&quot; + accountName;
-    }" />
+    <set-variable name="resource-group-id" value="{{usage-resource-group-id}}" />
+    <set-variable name="model-resource-id" value="{{usage-model-resource-id}}" />
     <set-variable name="subject-id" value="@{
       var material = &quot;{{tenant-id}}|agent|weather-forecast-agent&quot;;
       var key = Convert.FromBase64String(&quot;{{usage-hmac-key}}&quot;);

@@ -46,6 +46,11 @@ def process_event_batch(
                 settings.workload_model_resource_ids,
             )
         except EventValidationError as error:
+            LOGGER.warning(
+                "Quarantining usage event: reason=%s paths=%s",
+                error.code,
+                ",".join(error.paths) if error.paths else "none",
+            )
             try:
                 quarantine_writer.write(
                     build_quarantine_record(
@@ -64,6 +69,7 @@ def process_event_batch(
             quarantined += 1
             continue
         except ScopeViolation as error:
+            LOGGER.warning("Quarantining usage event: reason=%s", str(error))
             try:
                 quarantine_writer.write(
                     build_quarantine_record(body, str(error), evidence)

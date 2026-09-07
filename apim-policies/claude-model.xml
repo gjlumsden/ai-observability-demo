@@ -60,20 +60,8 @@
         <set-variable name="subject-value" value="@(((Jwt)context.Variables[&quot;validated-jwt&quot;]).Claims.GetValueOrDefault(&quot;oid&quot;, &quot;&quot;))" />
       </otherwise>
     </choose>
-    <set-variable name="resource-group-id" value="@{
-      var serviceId = context.Deployment.ServiceId ?? string.Empty;
-      var markerIndex = serviceId.ToLowerInvariant().IndexOf(&quot;/providers/&quot;);
-      return markerIndex &gt; 0 ? serviceId.Substring(0, markerIndex) : string.Empty;
-    }" />
-    <set-variable name="model-resource-id" value="@{
-      var resourceGroupId = (string)context.Variables[&quot;resource-group-id&quot;];
-      var host = context.Api.ServiceUrl == null ? string.Empty : context.Api.ServiceUrl.Host;
-      var dotIndex = host.IndexOf(&quot;.&quot;);
-      var accountName = dotIndex &gt; 0 ? host.Substring(0, dotIndex) : host;
-      return string.IsNullOrEmpty(resourceGroupId) || string.IsNullOrEmpty(accountName)
-        ? string.Empty
-        : resourceGroupId + &quot;/providers/Microsoft.CognitiveServices/accounts/&quot; + accountName;
-    }" />
+    <set-variable name="resource-group-id" value="{{usage-resource-group-id}}" />
+    <set-variable name="model-resource-id" value="{{usage-model-resource-id}}" />
     <set-variable name="subject-id" value="@{
       var material = ((string)context.Variables[&quot;subject-tenant&quot;]).ToLowerInvariant()
         + &quot;|&quot; + (string)context.Variables[&quot;subject-kind&quot;]

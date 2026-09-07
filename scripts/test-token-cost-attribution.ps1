@@ -185,10 +185,38 @@ function Test-DashboardContracts {
         -not $dashboardText.Contains('Needs checkpoint instrumentation')
     ) 'The operations dashboard still contains the checkpoint placeholder.'
     Assert-True (
+        -not $dashboardText.Contains('Needs separate instrumentation')
+    ) 'The duplicate and replay tile still contains placeholder status text.'
+    Assert-True (
+        -not $dashboardText.Contains('tolong(null)')
+    ) 'A dashboard query uses invalid KQL null conversion syntax.'
+    $invalidNullAggregateQueries = @(
+        $queries |
+            Where-Object {
+                $_ -match '(?m)^\| summarize[^\r\n]*=\s*(?:to)?(?:real|long)\(null\)'
+            }
+    )
+    Assert-True (
+        $invalidNullAggregateQueries.Count -eq 0
+    ) 'A dashboard query uses a scalar null expression as a summarize aggregate.'
+    Assert-True (
+        @(
+            [regex]::Matches(
+                $dashboardText,
+                'project RunId, CompletionTime = TimeGenerated, SourceType, SourceScope, SourcePath;'
+            )
+        ).Count -eq 4
+    ) 'Allocation freshness queries discard fields required by later filters.'
+    Assert-True (
+        $dashboardText.Contains('todouble(datetime_diff(\"hour\", now(), LastCompletedRun))') -and
+        $dashboardText.Contains('todouble(datetime_diff(\"hour\", now(), LastSeen))')
+    ) 'Allocation age queries do not return a type compatible with their null branch.'
+    Assert-True (
         $dashboardText.Contains('UsageProcessorCheckpointStatus') -and
         $dashboardText.Contains('checkpointAgeSeconds') -and
-        $dashboardText.Contains('sequenceLag')
-    ) 'The operations dashboard does not query checkpoint telemetry.'
+        $dashboardText.Contains('sequenceLag') -and
+        $dashboardText.Contains('LastEnqueuedSequenceNumber < 0, long(null), EventAgeSeconds')
+    ) 'The operations dashboard does not query valid checkpoint telemetry.'
 
     $dashboardModulePath = Join-Path $repositoryRoot 'infra\modules\grafana-dashboard.bicep'
     $dashboardModule = Get-Content -LiteralPath $dashboardModulePath -Raw
