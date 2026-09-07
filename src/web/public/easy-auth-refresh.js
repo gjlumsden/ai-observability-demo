@@ -1,10 +1,8 @@
-// Client-side helper: when the app server responds with HTTP 401 and code
-// PROVIDER_TOKEN_EXPIRED, calls the platform /.auth/refresh endpoint so the token store
-// renews the access token for this browser session, then retries the original action once.
+// Client-side helper for protected same-origin requests. It reads the short-lived provider
+// access token from the App Service token store and sends it as a bearer token. If the app
+// reports PROVIDER_TOKEN_EXPIRED, it refreshes the token and retries the action once.
 //
-// The App Service platform refreshes the provider token in its own token store. Subsequent
-// same-origin requests from the browser carry the fresh token automatically. No token value
-// is read, stored, or logged in this script.
+// The token stays in local function scope. This script does not persist or log it.
 //
 // See: https://learn.microsoft.com/azure/app-service/configure-authentication-oauth-tokens
 //
@@ -18,6 +16,7 @@
     root.fetchWithTokenRefresh = factory(root.fetch.bind(root));
   }
 }(typeof globalThis !== 'undefined' ? globalThis : this, function makeFetchWithTokenRefresh(fetchFn) {
+  const IDENTITY_URL = '/.auth/me';
   const REFRESH_URL = '/.auth/refresh';
   const REFRESH_TIMEOUT_MS = 10000;
 
@@ -29,8 +28,59 @@
     return err;
   }
 
+  function makeTokenUnavailableError() {
+    const err = new Error(
+      'Your signed-in access token is unavailable. Please sign out and sign back in.'
+    );
+    err.refreshFailed = true;
+    return err;
+  }
+
+  async function getProviderAccessToken() {
+    let response;
+    try {
+      response = await fetchFn(IDENTITY_URL, {
+        credentials: 'same-origin',
+        cache: 'no-store',
+        headers: { Accept: 'application/json' }
+      });
+    } catch {
+      throw makeTokenUnavailableError();
+    }
+
+    if (!response.ok) {
+      throw makeTokenUnavailableError();
+    }
+
+    let identities;
+    try {
+      identities = await response.json();
+    } catch {
+      throw makeTokenUnavailableError();
+    }
+
+    const identity = Array.isArray(identities)
+      ? identities.find((item) => item && typeof item.access_token === 'string' && item.access_token.length > 0)
+      : null;
+    if (!identity) {
+      throw makeTokenUnavailableError();
+    }
+
+    return identity.access_token;
+  }
+
+  function withBearerToken(options, accessToken) {
+    const requestOptions = Object.assign({}, options || {});
+    requestOptions.credentials = 'same-origin';
+    requestOptions.headers = Object.assign({}, requestOptions.headers || {}, {
+      Authorization: `Bearer ${accessToken}`
+    });
+    return requestOptions;
+  }
+
   return async function fetchWithTokenRefresh(url, options) {
-    const response = await fetchFn(url, options);
+    let accessToken = await getProviderAccessToken();
+    let response = await fetchFn(url, withBearerToken(options, accessToken));
     if (response.status !== 401) {
       return response;
     }
@@ -48,10 +98,8 @@
       return response;
     }
 
-    // Call the platform refresh endpoint. The browser session cookie is sent automatically
-    // with same-origin credentials; no token is read or forwarded by this script.
-    // redirect:'error' ensures an unexpected platform redirect is treated as a failure
-    // rather than silently following it. A finite timeout prevents indefinite blocking.
+    // redirect:'error' treats an unexpected platform redirect as a failure.
+    // The finite timeout prevents indefinite blocking.
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), REFRESH_TIMEOUT_MS);
     let refreshResponse;
@@ -62,8 +110,6 @@
         signal: controller.signal
       });
     } catch {
-      // Network error, unexpected redirect (with redirect:'error'), or timeout abort —
-      // all are refresh failures; surface through the same clear message.
       throw makeRefreshFailedError();
     } finally {
       clearTimeout(timeoutId);
@@ -73,8 +119,8 @@
       throw makeRefreshFailedError();
     }
 
-    // Retry the original action once. The platform has renewed the token in its store, so
-    // the next request carries a fresh X-MS-TOKEN-AAD-ACCESS-TOKEN header automatically.
-    return fetchFn(url, options);
+    accessToken = await getProviderAccessToken();
+    response = await fetchFn(url, withBearerToken(options, accessToken));
+    return response;
   };
 }));

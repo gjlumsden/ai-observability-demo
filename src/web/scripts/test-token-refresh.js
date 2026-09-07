@@ -10,10 +10,12 @@
 //   (3) Server endpoints         — expired header → 401/PROVIDER_TOKEN_EXPIRED on all four
 //                                  protected POST routes; fresh and absent headers must NOT
 //                                  return PROVIDER_TOKEN_EXPIRED (APIM isolated via stub)
-//   (4) Client helper            — non-401, non-object JSON, unrelated 401, network-error
-//                                  refresh, successful refresh+retry, non-2xx refresh
+//   (4) Client helper            — platform token acquisition, bearer injection, refresh,
+//                                  token reacquisition, malformed responses, no persistence
 
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 
 process.env.NODE_ENV = 'production';
 
@@ -275,23 +277,36 @@ class MockResponse {
 const makeFetchWithTokenRefresh = require('../public/easy-auth-refresh');
 
 async function runClientTests() {
-  // 4a. Non-401 → returned as-is; no refresh call.
+  const identityResponse = (token) => new MockResponse(200, JSON.stringify([
+    { provider_name: 'aad', access_token: token }
+  ]));
+
+  // 4a. The helper gets the platform token and sends it without removing request headers.
   {
-    let refreshCalled = false;
-    const mockFetch = async (url) => {
-      if (url === '/.auth/refresh') { refreshCalled = true; }
+    const calls = [];
+    const mockFetch = async (url, options) => {
+      calls.push({ url, options });
+      if (url === '/.auth/me') { return identityResponse('token-a'); }
       return new MockResponse(200, '{}');
     };
     const subject = makeFetchWithTokenRefresh(mockFetch);
-    const res = await subject('/test', {});
+    const res = await subject('/test', { method: 'POST', headers: { 'Content-Type': 'application/json' } });
     assert.equal(res.status, 200, '4a: 200 must be returned unchanged');
-    assert.equal(refreshCalled, false, '4a: refresh must not be called for a 200');
+    assert.deepEqual(calls.map((call) => call.url), ['/.auth/me', '/test'],
+      '4a: token acquisition must precede the protected action');
+    assert.equal(calls[1].options.headers.Authorization, 'Bearer token-a',
+      '4a: action must include the provider bearer token');
+    assert.equal(calls[1].options.headers['Content-Type'], 'application/json',
+      '4a: action must preserve caller headers');
+    assert.equal(calls[1].options.credentials, 'same-origin',
+      '4a: action must use same-origin credentials');
   }
 
-  // 4b. 401 with null JSON body — guard against non-object payload.
+  // 4b. A 401 with null JSON returns as-is and does not refresh.
   {
     let refreshCalled = false;
     const mockFetch = async (url) => {
+      if (url === '/.auth/me') { return identityResponse('token-a'); }
       if (url === '/.auth/refresh') { refreshCalled = true; }
       return new MockResponse(401, 'null');
     };
@@ -301,24 +316,25 @@ async function runClientTests() {
     assert.equal(refreshCalled, false, '4b: refresh must not be called for null payload');
   }
 
-  // 4c. 401 with unrelated code — returned as-is; no refresh call.
+  // 4c. A 401 with an unrelated code returns as-is and does not refresh.
   {
     let refreshCalled = false;
     const mockFetch = async (url) => {
+      if (url === '/.auth/me') { return identityResponse('token-a'); }
       if (url === '/.auth/refresh') { refreshCalled = true; }
       return new MockResponse(401, JSON.stringify({ code: 'OTHER_ERROR' }));
     };
     const subject = makeFetchWithTokenRefresh(mockFetch);
     const res = await subject('/test', {});
     assert.equal(res.status, 401, '4c: unrelated 401 must be returned unchanged');
-    assert.equal(refreshCalled, false, '4c: refresh must not be called for a non-PROVIDER_TOKEN_EXPIRED 401');
+    assert.equal(refreshCalled, false, '4c: unrelated 401 must not start refresh');
   }
 
-  // 4d. PROVIDER_TOKEN_EXPIRED, refresh throws (network error / redirect / timeout) →
-  //     throws refreshFailed; original action NOT retried.
+  // 4d. A refresh network error stops the request without a retry.
   {
     let actionCallCount = 0;
     const mockFetch = async (url) => {
+      if (url === '/.auth/me') { return identityResponse('token-a'); }
       if (url === '/.auth/refresh') { throw new TypeError('Failed to fetch'); }
       actionCallCount++;
       return new MockResponse(401, JSON.stringify({ code: 'PROVIDER_TOKEN_EXPIRED' }));
@@ -326,36 +342,42 @@ async function runClientTests() {
     const subject = makeFetchWithTokenRefresh(mockFetch);
     let caughtErr;
     try { await subject('/test', {}); } catch (e) { caughtErr = e; }
-    assert.ok(caughtErr, '4d: must throw when refresh network-errors');
-    assert.equal(caughtErr.refreshFailed, true, '4d: thrown error must have refreshFailed=true');
-    assert.equal(actionCallCount, 1, '4d: original action must not be retried after network-error refresh');
+    assert.ok(caughtErr, '4d: refresh network error must throw');
+    assert.equal(caughtErr.refreshFailed, true, '4d: error must have refreshFailed=true');
+    assert.equal(actionCallCount, 1, '4d: action must not retry after refresh network error');
   }
 
-  // 4e. PROVIDER_TOKEN_EXPIRED, refresh succeeds → original action retried once.
+  // 4e. A successful refresh reacquires the token and retries once.
   {
+    let identityCallCount = 0;
     let actionCallCount = 0;
-    let refreshCalled = false;
-    const mockFetch = async (url) => {
-      if (url === '/.auth/refresh') {
-        refreshCalled = true;
-        return new MockResponse(200, '');
+    const actionTokens = [];
+    const mockFetch = async (url, options) => {
+      if (url === '/.auth/me') {
+        identityCallCount++;
+        return identityResponse(identityCallCount === 1 ? 'token-old' : 'token-new');
       }
+      if (url === '/.auth/refresh') { return new MockResponse(200, ''); }
       actionCallCount++;
+      actionTokens.push(options.headers.Authorization);
       return actionCallCount === 1
         ? new MockResponse(401, JSON.stringify({ code: 'PROVIDER_TOKEN_EXPIRED' }))
         : new MockResponse(200, JSON.stringify({ ok: true }));
     };
     const subject = makeFetchWithTokenRefresh(mockFetch);
     const res = await subject('/test', {});
-    assert.equal(refreshCalled, true, '4e: refresh must be called after PROVIDER_TOKEN_EXPIRED');
-    assert.equal(actionCallCount, 2, '4e: original action must be retried once after successful refresh');
-    assert.equal(res.status, 200, '4e: retry response must be returned to the caller');
+    assert.equal(identityCallCount, 2, '4e: refreshed request must reacquire the platform token');
+    assert.equal(actionCallCount, 2, '4e: action must retry once');
+    assert.deepEqual(actionTokens, ['Bearer token-old', 'Bearer token-new'],
+      '4e: retry must use the refreshed token');
+    assert.equal(res.status, 200, '4e: retry response must be returned');
   }
 
-  // 4f. PROVIDER_TOKEN_EXPIRED, refresh returns non-2xx → throws refreshFailed; no retry.
+  // 4f. A non-success refresh response stops the request without a retry.
   {
     let actionCallCount = 0;
     const mockFetch = async (url) => {
+      if (url === '/.auth/me') { return identityResponse('token-a'); }
       if (url === '/.auth/refresh') { return new MockResponse(401, ''); }
       actionCallCount++;
       return new MockResponse(401, JSON.stringify({ code: 'PROVIDER_TOKEN_EXPIRED' }));
@@ -363,12 +385,36 @@ async function runClientTests() {
     const subject = makeFetchWithTokenRefresh(mockFetch);
     let caughtErr;
     try { await subject('/test', {}); } catch (e) { caughtErr = e; }
-    assert.ok(caughtErr, '4f: must throw when refresh returns non-2xx');
-    assert.equal(caughtErr.refreshFailed, true, '4f: thrown error must have refreshFailed=true');
-    assert.equal(actionCallCount, 1, '4f: original action must not be retried after non-2xx refresh');
+    assert.ok(caughtErr, '4f: non-success refresh must throw');
+    assert.equal(caughtErr.refreshFailed, true, '4f: error must have refreshFailed=true');
+    assert.equal(actionCallCount, 1, '4f: action must not retry after failed refresh');
   }
 
-  console.log('(4) Client token refresh helper tests passed.');
+  // 4g. Missing or malformed platform tokens stop before the protected action.
+  for (const [name, response] of [
+    ['non-success', new MockResponse(401, '[]')],
+    ['malformed JSON', new MockResponse(200, 'not-json')],
+    ['missing token', new MockResponse(200, JSON.stringify([{ provider_name: 'aad' }]))]
+  ]) {
+    let actionCalled = false;
+    const mockFetch = async (url) => {
+      if (url === '/.auth/me') { return response; }
+      actionCalled = true;
+      return new MockResponse(200, '{}');
+    };
+    const subject = makeFetchWithTokenRefresh(mockFetch);
+    let caughtErr;
+    try { await subject('/test', {}); } catch (e) { caughtErr = e; }
+    assert.ok(caughtErr, `4g ${name}: unavailable token must throw`);
+    assert.equal(caughtErr.refreshFailed, true, `4g ${name}: error must have refreshFailed=true`);
+    assert.equal(actionCalled, false, `4g ${name}: protected action must not run`);
+  }
+
+  const helperSource = fs.readFileSync(path.join(__dirname, '..', 'public', 'easy-auth-refresh.js'), 'utf8');
+  assert.doesNotMatch(helperSource, /localStorage|sessionStorage|console\./,
+    '4h: helper must not persist or log the provider token');
+
+  console.log('(4) Client bearer-token and refresh helper tests passed.');
 }
 
 Promise.all([runServerTests(), runClientTests()]).catch((error) => {

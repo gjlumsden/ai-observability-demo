@@ -11,6 +11,9 @@
     "principalId": {
       "value": "${AZURE_PRINCIPAL_ID}"
     },
+    "entraClientId": {
+      "value": "${ENTRA_CLIENT_ID=}"
+    },
     "budgetStartDate": {
       "value": "${BUDGET_START_DATE}"
     },

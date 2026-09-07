@@ -40,11 +40,16 @@ or verify token signatures, issuers, audiences, or lifetimes. The platform valid
 those. Protected routes cannot be exercised on a local development machine. The local
 sign-in page states this.
 
+For each protected action, the browser reads the provider access token from
+`/.auth/me`. It sends that token to the same origin in the `Authorization` header.
+This lets Easy Auth validate the POST before the request reaches Node. The helper keeps
+the token only in function memory. It does not log or persist the token.
+
 Provider access tokens can expire before the App Service session. Before a
 downstream call, the app uses the platform expiry header to detect that condition.
-The browser then calls `/.auth/refresh` with its existing session and retries the
-action once. A failed refresh stops the action and shows an error. The app does not
-implement an OAuth exchange or persist provider tokens.
+The browser then calls `/.auth/refresh`, reads the renewed token from `/.auth/me`, and
+retries the action once. A failed refresh stops the action and shows an error. The app
+does not implement an OAuth exchange.
 See [App Service token renewal](https://learn.microsoft.com/azure/app-service/configure-authentication-oauth-tokens).
 
 The predeployment tests (`npm run test:auth-validation`, `npm run test:auth-logging`)

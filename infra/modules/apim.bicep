@@ -31,6 +31,9 @@ param usageKeyVaultName string
 @description('Versionless Key Vault reference for the usage HMAC key.')
 param usageHmacKeyVaultReference string
 
+@description('Existing Entra application client ID. An empty value is valid only for the first deployment.')
+param entraClientId string = ''
+
 @description('Tags applied to every resource in the demo platform.')
 param tags object = {}
 
@@ -95,7 +98,7 @@ resource entraClientIdNamedValue 'Microsoft.ApiManagement/service/namedValues@20
   name: 'entra-client-id'
   properties: {
     displayName: 'entra-client-id'
-    value: '00000000-0000-0000-0000-000000000000'
+    value: empty(entraClientId) ? '00000000-0000-0000-0000-000000000000' : entraClientId
     secret: false
   }
 }

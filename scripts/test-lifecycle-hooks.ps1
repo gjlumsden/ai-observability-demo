@@ -208,6 +208,9 @@ exit /b 1
 }
 function Test-PostprovisionAuthContracts {
     $postprovision = Get-Content -LiteralPath (Join-Path $repositoryRoot 'hooks\postprovision.ps1') -Raw
+    $mainBicep = Get-Content -LiteralPath (Join-Path $repositoryRoot 'infra\main.bicep') -Raw
+    $mainParameters = Get-Content -LiteralPath (Join-Path $repositoryRoot 'infra\main.parameters.json') -Raw
+    $apimBicep = Get-Content -LiteralPath (Join-Path $repositoryRoot 'infra\modules\apim.bicep') -Raw
     . (Join-Path $repositoryRoot 'hooks\app-auth.ps1')
 
     Assert-True (
@@ -292,6 +295,22 @@ function Test-PostprovisionAuthContracts {
         $postprovision.Contains('api = @{') -and
         $postprovision.Contains('requestedAccessTokenVersion = 2')
     ) 'The postprovision hook must set api.requestedAccessTokenVersion to 2 in the Graph app patch payload.'
+    Assert-True (
+        $postprovision.Contains("'--named-value-id', 'entra-client-id'") -and
+        $postprovision.Contains("'--value', `$app.appId")
+    ) 'The postprovision hook must update the APIM Entra audience with the actual client ID.'
+    Assert-True (
+        $mainParameters.Contains('"entraClientId"') -and
+        $mainParameters.Contains('${ENTRA_CLIENT_ID=}')
+    ) 'The main parameter file must restore the persisted Entra client ID during later provisions.'
+    Assert-True (
+        $mainBicep.Contains("param entraClientId string = ''") -and
+        ([regex]::Matches($mainBicep, 'entraClientId: entraClientId')).Count -eq 2
+    ) 'The main template must pass one Entra client ID to APIM and App Service.'
+    Assert-True (
+        $apimBicep.Contains("param entraClientId string = ''") -and
+        $apimBicep.Contains("empty(entraClientId) ? '00000000-0000-0000-0000-000000000000' : entraClientId")
+    ) 'The APIM template must use the placeholder only before the first Entra registration exists.'
 
     Write-Host 'Validated postprovision Easy Auth integration contracts.'
 }

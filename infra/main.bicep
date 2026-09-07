@@ -23,6 +23,9 @@ param tags object = {
 @description('Current user or deployment principal object ID for role assignments.')
 param principalId string = ''
 
+@description('Existing Entra application client ID. The postprovision hook creates and persists it after the first deployment.')
+param entraClientId string = ''
+
 @minValue(1)
 @description('Monthly resource group budget amount in the billing currency.')
 param monthlyBudgetAmount int = 500
@@ -150,6 +153,7 @@ module apim 'modules/apim.bicep' = {
     usageEventHubName: usageEventStream.outputs.eventHubName
     usageKeyVaultName: identityVault.outputs.keyVaultName
     usageHmacKeyVaultReference: identityVault.outputs.secretIdentifier
+    entraClientId: entraClientId
   }
 }
 
@@ -220,7 +224,7 @@ module appService 'modules/app-service.bicep' = {
     apimBaseUrl: apim.outputs.gatewayUrl
     apimPresenterKey: apim.outputs.presenterSubscriptionKey
     entraTenantId: subscription().tenantId
-    entraClientId: ''
+    entraClientId: entraClientId
     applicationInsightsConnectionString: monitoring.outputs.appInsightsConnectionString
   }
 }
