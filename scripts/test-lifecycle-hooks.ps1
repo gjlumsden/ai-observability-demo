@@ -259,6 +259,34 @@ function Test-BudgetPreservationContracts {
     $mainParameters = Get-Content -LiteralPath (Join-Path $repositoryRoot 'infra\main.parameters.json') -Raw
     $deployFinOps = Get-Content -LiteralPath (Join-Path $repositoryRoot 'hooks\deploy-finops-hub.ps1') -Raw
 
+    $tokens = $null
+    $parseErrors = $null
+    $ast = [System.Management.Automation.Language.Parser]::ParseInput(
+        $preprovision, [ref]$tokens, [ref]$parseErrors
+    )
+    $dateFunction = $ast.Find({
+        param($node)
+        $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+            $node.Name -eq 'ConvertTo-BudgetDate'
+    }, $false)
+    Assert-True ($null -ne $dateFunction) 'The budget date formatter is missing.'
+    . ([scriptblock]::Create($dateFunction.Extent.Text))
+
+    $budgetFixture = '{"startDate":"2031-08-01T00:00:00Z","endDate":"2041-08-01T00:00:00Z"}' | ConvertFrom-Json
+    $previousCulture = [System.Threading.Thread]::CurrentThread.CurrentCulture
+    try {
+        foreach ($cultureName in @('en-US', 'en-GB', 'de-DE')) {
+            [System.Threading.Thread]::CurrentThread.CurrentCulture = [System.Globalization.CultureInfo]::GetCultureInfo($cultureName)
+            Assert-True ((ConvertTo-BudgetDate $budgetFixture.startDate) -ceq '2031-08-01') 'JSON budget dates must use an invariant date format.'
+            Assert-True ((ConvertTo-BudgetDate $budgetFixture.endDate) -ceq '2041-08-01') 'Budget end dates must use an invariant date format.'
+            Assert-True ((ConvertTo-BudgetDate '2031-08-01T00:00:00Z') -ceq '2031-08-01') 'String budget dates must remain supported.'
+            Assert-True ((ConvertTo-BudgetDate ([DateTimeOffset]::Parse('2031-08-01T00:00:00Z'))) -ceq '2031-08-01') 'DateTimeOffset budget dates must remain supported.'
+        }
+    }
+    finally {
+        [System.Threading.Thread]::CurrentThread.CurrentCulture = $previousCulture
+    }
+
     # Preprovision must read and preserve the existing budget dates.
     Assert-True (
         $preprovision.Contains('BUDGET_START_DATE')
@@ -320,6 +348,10 @@ function Test-LocalAzdContracts {
     Assert-True (
         -not $deployFinOps.Contains('SecurityControl')
     ) 'The FinOps deployment hook must not hardcode environment-specific security control tags.'
+    Assert-True (
+        $deployFinOps.Contains('Could not read existing FinOps resource group tags:') -and
+        $deployFinOps.Contains('The FinOps resource group tag lookup returned an empty response.')
+    ) 'A failed tag lookup must stop before creating or updating the FinOps resource group.'
     # KV recovery calls az group create without --tags so ARM preserves existing tags.
     $recoveryCreateIdx = $preprovision.IndexOf('az group create', $preprovision.IndexOf('Recovering purge-protected Key Vault'))
     $recoveryTagsIdx = $preprovision.IndexOf('--tags', $recoveryCreateIdx)

@@ -188,12 +188,20 @@ $existingFinOpsTagsJson = & az group show `
     --subscription $subscriptionId `
     --name $finOpsResourceGroupName `
     --query tags `
-    --output json 2>$null
+    --only-show-errors `
+    --output json 2>&1
+$tagLookupExitCode = $LASTEXITCODE
+if ($tagLookupExitCode -ne 0 -and ($existingFinOpsTagsJson -join "`n") -notmatch '\((ResourceGroupNotFound|404)\)') {
+    throw "Could not read existing FinOps resource group tags: $($existingFinOpsTagsJson -join "`n")"
+}
+if ($tagLookupExitCode -eq 0 -and -not $existingFinOpsTagsJson) {
+    throw 'The FinOps resource group tag lookup returned an empty response.'
+}
 $finOpsTagList = [System.Collections.Generic.List[string]]@(
     'workload=ai-observability'
     'component=finops-hub'
 )
-if ($LASTEXITCODE -eq 0 -and $existingFinOpsTagsJson -and ($existingFinOpsTagsJson -join "`n").Trim() -ne 'null') {
+if ($tagLookupExitCode -eq 0 -and ($existingFinOpsTagsJson -join "`n").Trim() -ne 'null') {
     $existingFinOpsTags = ($existingFinOpsTagsJson -join "`n" | ConvertFrom-Json)
     foreach ($prop in $existingFinOpsTags.PSObject.Properties) {
         if (-not ($finOpsTagList | Where-Object { $_ -like "$($prop.Name)=*" })) {

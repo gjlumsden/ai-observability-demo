@@ -22,6 +22,14 @@ function Get-AzdEnvironmentValues {
   return $values
 }
 
+function ConvertTo-BudgetDate {
+    param([Parameter(Mandatory = $true)][DateTimeOffset] $Value)
+
+    return $Value.ToUniversalTime().ToString(
+        'yyyy-MM-dd', [System.Globalization.CultureInfo]::InvariantCulture
+    )
+}
+
 function Test-ActionMatch {
   param(
       [Parameter(Mandatory = $true)][string] $Pattern,
@@ -326,29 +334,30 @@ if ($resourceGroupName) {
         --method GET `
         --uri $budgetUri `
         --output json 2>&1
-    if ($LASTEXITCODE -eq 0 -and $budgetOutput) {
+    if ($LASTEXITCODE -eq 0) {
+        if (-not $budgetOutput) {
+            throw 'The budget lookup returned an empty response.'
+        }
         $existingBudget = ($budgetOutput -join "`n" | ConvertFrom-Json)
-        if ($existingBudget.properties.timePeriod.startDate) {
-            $budgetStartDate = ($existingBudget.properties.timePeriod.startDate -replace 'T.*$', '')
-        }
+        $budgetStartDate = ConvertTo-BudgetDate $existingBudget.properties.timePeriod.startDate
         if ($existingBudget.properties.timePeriod.endDate) {
-            $budgetEndDate = ($existingBudget.properties.timePeriod.endDate -replace 'T.*$', '')
+            $budgetEndDate = ConvertTo-BudgetDate $existingBudget.properties.timePeriod.endDate
         }
-        Write-Host "Preserved existing budget period: $budgetStartDate – $budgetEndDate"
-    } elseif (($budgetOutput -join "`n") -match 'ResourceNotFound|BudgetNotFound|does not exist|NotFound|404') {
+        Write-Host "Preserved existing budget period: $budgetStartDate to $budgetEndDate"
+    } elseif (($budgetOutput -join "`n") -match '\((ResourceNotFound|ResourceGroupNotFound|BudgetNotFound|NotFound|404)\)') {
         # Budget does not exist yet; choose the first day of the current UTC month.
-        $now = [System.DateTime]::UtcNow
-        $budgetStartDate = (New-Object System.DateTime $now.Year, $now.Month, 1, 0, 0, 0, ([System.DateTimeKind]::Utc)).ToString('yyyy-MM-dd')
+        $budgetStartDate = [System.DateTime]::UtcNow.ToString(
+            'yyyy-MM-01', [System.Globalization.CultureInfo]::InvariantCulture
+        )
         Write-Host "Budget not found; using start date: $budgetStartDate"
     } elseif (($budgetOutput -join "`n") -match 'AuthorizationFailed|Forbidden|does not have.*permission|403') {
         throw "Could not read the existing budget to preserve its start date (authorization denied): $($budgetOutput -join "`n")"
-    } elseif ($budgetOutput) {
+    } else {
         throw "Could not read the existing budget to preserve its start date: $($budgetOutput -join "`n")"
     }
 }
 if (-not $budgetStartDate) {
-    $now = [System.DateTime]::UtcNow
-    $budgetStartDate = (New-Object System.DateTime $now.Year, $now.Month, 1, 0, 0, 0, ([System.DateTimeKind]::Utc)).ToString('yyyy-MM-dd')
+    throw 'A resource group and a valid budget start date are required before deployment.'
 }
 
 & azd env set BUDGET_START_DATE $budgetStartDate --cwd $repoRoot | Out-Null
