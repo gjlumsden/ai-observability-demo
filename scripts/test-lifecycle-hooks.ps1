@@ -65,6 +65,12 @@ function Test-PreprovisionContracts {
             $preprovision.Contains("'Microsoft.Resources/deploymentScripts/$action'")
         ) "Preprovision must require deployment-script $action access for FinOps trigger lifecycle handling."
     }
+    Assert-True (
+        $preprovision.Contains("'Microsoft.Web/sites/config/write'")
+    ) 'The preprovision hook must keep the exact Web config write permission check for Easy Auth.'
+    Assert-True (
+        $preprovision.Contains("'Microsoft.Web/sites/functions/read'")
+    ) 'The preprovision hook must require Microsoft.Web/sites/functions/read for the postdeploy function registration readiness check.'
 
     Write-Host 'Validated preprovision legacy-check and permission contracts.'
 }
@@ -717,6 +723,142 @@ function Test-LocalAzdContracts {
     Write-Host 'Validated local azd, FinOps wrapper, and RG tag-preservation contracts.'
 }
 
+function Test-PostdeployFunctionReadinessContracts {
+    $postdeploy = Get-Content -LiteralPath (Join-Path $repositoryRoot 'hooks\postdeploy.ps1') -Raw
+
+    # Postdeploy must delegate to the shared helper, not duplicate the logic inline.
+    Assert-True (
+        $postdeploy.Contains(". (Join-Path `$PSScriptRoot 'function-readiness.ps1')")
+    ) 'The postdeploy hook must dot-source the function-readiness helper.'
+    Assert-True (
+        $postdeploy.Contains('Invoke-FunctionAppReadinessCheck')
+    ) 'The postdeploy hook must call Invoke-FunctionAppReadinessCheck from the helper.'
+
+    # Must read subscription and resource group from azd env values; no hardcoded names.
+    Assert-True (
+        $postdeploy.Contains("Get-RequiredValue `$values 'AZURE_SUBSCRIPTION_ID'")
+    ) 'The postdeploy readiness check must read AZURE_SUBSCRIPTION_ID from azd env values.'
+    Assert-True (
+        $postdeploy.Contains("Get-RequiredValue `$values 'AZURE_RESOURCE_GROUP'")
+    ) 'The postdeploy readiness check must read AZURE_RESOURCE_GROUP from azd env values.'
+    Assert-True (
+        $postdeploy.Contains("Get-RequiredValue `$values 'USAGE_PROCESSOR_FUNCTION_NAME'")
+    ) 'The postdeploy readiness check must identify the Function App by its USAGE_PROCESSOR_FUNCTION_NAME azd value.'
+
+    # All four expected function names must be explicitly listed at the call site.
+    foreach ($name in @('ProcessAIUsage', 'MonitorEventHubCheckpoints', 'AllocateFocusCost', 'RecordClaudeCcuContext')) {
+        Assert-True (
+            $postdeploy.Contains("'$name'")
+        ) "The postdeploy readiness check must list expected function '$name'."
+    }
+
+    # Existing steps must still be present.
+    Assert-True (
+        $postdeploy.Contains('/healthz')
+    ) 'The postdeploy hook must still include the web health check.'
+    Assert-True (
+        $postdeploy.Contains('configure-weather-agent.ps1')
+    ) 'The postdeploy hook must still run weather agent configuration.'
+
+    Write-Host 'Validated postdeploy function registration readiness contracts.'
+}
+
+function Test-FunctionReadinessBehavior {
+    . (Join-Path $repositoryRoot 'hooks\function-readiness.ps1')
+
+    $app      = 'myapp'
+    $sub      = '00000000-0000-0000-0000-000000000001'
+    $rg       = 'rg-test'
+    $expected = @('FuncA', 'FuncB', 'FuncC', 'FuncD')
+
+    # Helper: build a mock that always returns the same JSON and exit code.
+    function New-MockList {
+        param([string] $Json, [int] $ExitCode = 0)
+        return [scriptblock]::Create("`$global:LASTEXITCODE = $ExitCode; return @('$Json')")
+    }
+
+    # 1. All four functions present with '<app>/' prefix — happy path.
+    $result = Invoke-FunctionAppReadinessCheck `
+        -FunctionAppName $app -SubscriptionId $sub -ResourceGroupName $rg `
+        -ExpectedFunctions $expected -MaxAttempts 1 -DelaySeconds 0 `
+        -GetFunctionList (New-MockList '["myapp/FuncA","myapp/FuncB","myapp/FuncC","myapp/FuncD"]')
+    Assert-True (
+        $result.Count -eq 4 -and ($result -contains 'FuncA') -and ($result -notcontains 'myapp/FuncA')
+    ) 'The helper must normalize <app>/<function> envelope names and return the bare function names.'
+
+    # 2. Missing function after all retries must throw with the missing name.
+    $failed = $false; $errMsg = ''
+    try {
+        Invoke-FunctionAppReadinessCheck `
+            -FunctionAppName $app -SubscriptionId $sub -ResourceGroupName $rg `
+            -ExpectedFunctions $expected -MaxAttempts 1 -DelaySeconds 0 `
+            -GetFunctionList (New-MockList '["myapp/FuncA","myapp/FuncB","myapp/FuncC"]')
+    } catch { $failed = $true; $errMsg = $_.Exception.Message }
+    Assert-True $failed 'Missing functions must cause a hard failure after all retries.'
+    Assert-True ($errMsg -match 'Missing') 'The error message must identify missing functions.'
+    Assert-True ($errMsg -match 'FuncD') 'The error message must name the specific missing function.'
+
+    # 3. Unexpected function must throw with the unexpected name.
+    $failed = $false; $errMsg = ''
+    try {
+        Invoke-FunctionAppReadinessCheck `
+            -FunctionAppName $app -SubscriptionId $sub -ResourceGroupName $rg `
+            -ExpectedFunctions $expected -MaxAttempts 1 -DelaySeconds 0 `
+            -GetFunctionList (New-MockList '["myapp/FuncA","myapp/FuncB","myapp/FuncC","myapp/FuncD","myapp/FuncE"]')
+    } catch { $failed = $true; $errMsg = $_.Exception.Message }
+    Assert-True $failed 'An unexpected function must cause a hard failure.'
+    Assert-True ($errMsg -match 'Unexpected') 'The error message must identify unexpected functions.'
+    Assert-True ($errMsg -match 'FuncE') 'The error message must name the unexpected function.'
+
+    # 4. CLI error must throw immediately without retrying.
+    $global:_cliErrCalls = 0
+    $mockCliError = {
+        param($a, $s, $r)
+        $global:_cliErrCalls++
+        $global:LASTEXITCODE = 1
+        return @()
+    }
+    $failed = $false
+    try {
+        Invoke-FunctionAppReadinessCheck `
+            -FunctionAppName $app -SubscriptionId $sub -ResourceGroupName $rg `
+            -ExpectedFunctions $expected -MaxAttempts 3 -DelaySeconds 0 `
+            -GetFunctionList $mockCliError
+    } catch { $failed = $true }
+    Assert-True $failed 'A non-zero az exit code must cause a hard failure.'
+    Assert-True ($global:_cliErrCalls -eq 1) 'A non-zero az exit code must throw immediately; the az call must not be retried.'
+    Remove-Item 'Variable:global:_cliErrCalls' -ErrorAction SilentlyContinue
+
+    # 5. Malformed JSON must cause a hard failure (ConvertFrom-Json throws).
+    $failed = $false
+    try {
+        Invoke-FunctionAppReadinessCheck `
+            -FunctionAppName $app -SubscriptionId $sub -ResourceGroupName $rg `
+            -ExpectedFunctions $expected -MaxAttempts 1 -DelaySeconds 0 `
+            -GetFunctionList (New-MockList 'not valid json at all')
+    } catch { $failed = $true }
+    Assert-True $failed 'Malformed JSON from az must cause a hard failure.'
+
+    # 6. Polling: empty first attempt, all four on second — must succeed after one retry.
+    $global:_pollCalls = 0
+    $mockPolling = {
+        param($a, $s, $r)
+        $global:LASTEXITCODE = 0
+        $global:_pollCalls++
+        if ($global:_pollCalls -le 1) { return @('[]') }
+        return @('["myapp/FuncA","myapp/FuncB","myapp/FuncC","myapp/FuncD"]')
+    }
+    $result = Invoke-FunctionAppReadinessCheck `
+        -FunctionAppName $app -SubscriptionId $sub -ResourceGroupName $rg `
+        -ExpectedFunctions $expected -MaxAttempts 3 -DelaySeconds 0 `
+        -GetFunctionList $mockPolling
+    Assert-True ($global:_pollCalls -eq 2) 'The helper must retry when functions are not yet registered and succeed on a later attempt.'
+    Assert-True ($result.Count -eq 4) 'The helper must return all four names after a successful poll.'
+    Remove-Item 'Variable:global:_pollCalls' -ErrorAction SilentlyContinue
+
+    Write-Host 'Validated function readiness check behavioral contracts.'
+}
+
 Push-Location $repositoryRoot
 try {
     Test-PowerShellSyntax @(
@@ -728,6 +870,8 @@ try {
         'hooks\deploy-finops-hub.ps1'
         'hooks\postprovision.ps1'
         'hooks\app-auth.ps1'
+        'hooks\postdeploy.ps1'
+        'hooks\function-readiness.ps1'
         'hooks\predown.ps1'
         'hooks\postdown.ps1'
         'demo-scripts\teardown.ps1'
@@ -742,6 +886,8 @@ try {
     Test-TeardownInheritedApprovalRegression
     Test-PostprovisionAuthContracts
     Test-LocalAzdContracts
+    Test-PostdeployFunctionReadinessContracts
+    Test-FunctionReadinessBehavior
 }
 finally {
     Pop-Location

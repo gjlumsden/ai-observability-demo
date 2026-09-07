@@ -31,13 +31,15 @@ function Get-RequiredValue {
 }
 
 $values = Get-AzdEnvironmentValues
-$webAppName = Get-RequiredValue $values 'WEB_APP_NAME'
-$apimGatewayUrl = (Get-RequiredValue $values 'APIM_GATEWAY_URL').TrimEnd('/')
-$foundryEndpoint = (Get-RequiredValue $values 'FOUNDRY_ENDPOINT').TrimEnd('/')
-$weatherMcpUrl = Get-RequiredValue $values 'WEATHER_MCP_API_URL'
+$webAppName         = Get-RequiredValue $values 'WEB_APP_NAME'
+$apimGatewayUrl     = (Get-RequiredValue $values 'APIM_GATEWAY_URL').TrimEnd('/')
+$foundryEndpoint    = (Get-RequiredValue $values 'FOUNDRY_ENDPOINT').TrimEnd('/')
+$weatherMcpUrl      = Get-RequiredValue $values 'WEATHER_MCP_API_URL'
 $usageProcessorName = Get-RequiredValue $values 'USAGE_PROCESSOR_FUNCTION_NAME'
-$webAppUrl = "https://$webAppName.azurewebsites.net"
-$healthUrl = "$webAppUrl/healthz"
+$subscriptionId     = Get-RequiredValue $values 'AZURE_SUBSCRIPTION_ID'
+$resourceGroupName  = Get-RequiredValue $values 'AZURE_RESOURCE_GROUP'
+$webAppUrl          = "https://$webAppName.azurewebsites.net"
+$healthUrl          = "$webAppUrl/healthz"
 
 Write-Host ''
 Write-Host 'AI Observability Demo post-deploy checks' -ForegroundColor Cyan
@@ -64,6 +66,20 @@ if (-not $healthy) {
 }
 
 Write-Host 'Web health check passed.' -ForegroundColor Green
+
+# ----- Usage Function App registration check -----
+# Catches deployment failures where azd reports success but the host has zero
+# functions (e.g., a Python worker annotation error that prevents all functions
+# from loading).  RBAC required: Microsoft.Web/sites/functions/read.
+Write-Host ''
+Write-Host 'Checking usage Function App function registration...' -ForegroundColor Cyan
+. (Join-Path $PSScriptRoot 'function-readiness.ps1')
+$registeredFunctions = Invoke-FunctionAppReadinessCheck `
+    -FunctionAppName  $usageProcessorName `
+    -SubscriptionId   $subscriptionId `
+    -ResourceGroupName $resourceGroupName `
+    -ExpectedFunctions @('ProcessAIUsage', 'MonitorEventHubCheckpoints', 'AllocateFocusCost', 'RecordClaudeCcuContext')
+Write-Host "Usage Function App registration check passed: $($registeredFunctions -join ', ')." -ForegroundColor Green
 
 & (Join-Path $PSScriptRoot '..\scripts\configure-weather-agent.ps1')
 

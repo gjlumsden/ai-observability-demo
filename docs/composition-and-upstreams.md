@@ -36,7 +36,7 @@ practice. This document does not label them as such.
 
 | Class | Meaning |
 | --- | --- |
-| Exact vendored source | The upstream files are copied into the repository, pinned by commit and digest, and deployed without changing their logic. |
+| Exact vendored source | The upstream files are copied into the repository and pinned by commit and digest. They remain byte-identical. Any deployment-time compatibility correction is documented separately. |
 | Pinned AVM module | An Azure Verified Module is referenced from the public Bicep registry at a fixed version. The registry supplies the module at build time. |
 | Adapted sample | The project copies a Microsoft sample shape, then changes parameters or structure for this demo. |
 | SDK or platform feature | The project uses a supported SDK, API, or platform policy as documented on Microsoft Learn. No upstream repository code is copied. |

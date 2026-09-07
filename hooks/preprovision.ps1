@@ -187,6 +187,7 @@ $requiredActions = @(
   'Microsoft.Resources/deploymentScripts/write'
   'Microsoft.Resources/deploymentScripts/delete'
   'Microsoft.Web/sites/config/write'
+  'Microsoft.Web/sites/functions/read'
 )
 $missingActions = @($requiredActions | Where-Object { -not (Test-AzurePermission $permissions $_) })
 if ($missingActions.Count -gt 0) {

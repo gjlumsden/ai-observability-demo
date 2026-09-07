@@ -188,8 +188,32 @@ deletion is approved. Retain unrelated resources and the Entra app registration.
 Do not run the full teardown wrapper when the upgrade must preserve the app,
 Foundry deployments, APIM, or workspace.
 
-The post-deploy hook checks the web health endpoint.
+The post-deploy hook checks the web health endpoint and all four usage Function registrations.
 It also installs the pinned Foundry Connections extension, configures the encrypted MCP connection, and upserts `weather-forecast-agent`.
+
+If only the usage processor needs a package repair, deploy that service:
+
+```powershell
+azd deploy usageProcessor --no-prompt
+```
+
+Package publication does not prove that the Python worker loaded the functions.
+The deployed Python 3.12 worker requires `typing.List[EventHubEvent]` for the batch
+binding. A built-in `list[EventHubEvent]` annotation prevented registration.
+
+If a resumed deployment does not run the project post-deploy hook, run it explicitly:
+
+```powershell
+pwsh -NoProfile -File .\hooks\postdeploy.ps1
+```
+
+The startup checks do not invoke a model or establish functional acceptance.
+
+Before the first Event Hubs invocation, the platform checkpoint container can be absent.
+The checkpoint monitor treats confirmed `ContainerNotFound` and `BlobNotFound`
+responses as absent checkpoints. Empty partitions report `idle`. Non-empty
+partitions without checkpoints report `missing` and retain their actual partition
+position. Authorization failures and unknown storage errors still stop the monitor.
 
 ## Identity checks
 
