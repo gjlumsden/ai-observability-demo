@@ -180,6 +180,9 @@ $requiredActions = @(
   'Microsoft.CostManagement/exports/delete'
   'Microsoft.Consumption/budgets/write'
   'Microsoft.DataFactory/factories/write'
+  'Microsoft.Resources/deploymentScripts/read'
+  'Microsoft.Resources/deploymentScripts/write'
+  'Microsoft.Resources/deploymentScripts/delete'
   'Microsoft.Web/sites/config/write'
 )
 $missingActions = @($requiredActions | Where-Object { -not (Test-AzurePermission $permissions $_) })

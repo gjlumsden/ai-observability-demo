@@ -122,6 +122,9 @@ function Invoke-FinOpsDeployment {
         [System.Text.UTF8Encoding]::new($false)
     )
 
+    Clear-FinOpsTriggerScriptCache -SubscriptionId $subscriptionId `
+        -ResourceGroupName $finOpsResourceGroupName -HubName $finOpsHubName
+
     $output = & az deployment group create `
         --only-show-errors `
         --subscription $subscriptionId `
@@ -140,6 +143,7 @@ function Invoke-FinOpsDeployment {
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 . (Join-Path $PSScriptRoot 'budget-period.ps1')
+. (Join-Path $PSScriptRoot 'finops-script-cache.ps1')
 & (Join-Path $repoRoot 'scripts\verify-finops-release.ps1')
 
 $values = Get-AzdEnvironmentValues

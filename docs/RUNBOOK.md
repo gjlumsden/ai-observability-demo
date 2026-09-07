@@ -138,6 +138,13 @@ managed exports. The hook then grants Data Factory access. The second pass
 enables one daily month-to-date and one monthly previous-month FOCUS export.
 The hook rejects exports outside the exact main resource-group scope.
 
+Before each pass, the hook clears completed trigger-management deployment-script
+records owned by this FinOps hub. The unchanged Microsoft scripts then stop and
+restart Data Factory triggers instead of reusing a cached result.
+The hook retains running or failed script records for diagnosis and stops.
+This step does not delete Data Factory triggers, pipelines, storage, or billing data.
+The vendored Microsoft source remains unchanged.
+
 The support resource group has a separate monthly budget. Its default amount is
 100 in the subscription billing currency. The support group is excluded from
 the monitored FOCUS dataset.

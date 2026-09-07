@@ -53,6 +53,11 @@ function Test-PreprovisionContracts {
     Assert-True (
         -not $preprovision.Contains("'Microsoft.DataFactory/factories/*'")
     ) 'The preprovision hook must not use wildcard Data Factory permission checks.'
+    foreach ($action in @('read', 'write', 'delete')) {
+        Assert-True (
+            $preprovision.Contains("'Microsoft.Resources/deploymentScripts/$action'")
+        ) "Preprovision must require deployment-script $action access for FinOps trigger lifecycle handling."
+    }
 
     Write-Host 'Validated preprovision legacy-check and permission contracts.'
 }
@@ -356,6 +361,97 @@ function Test-BudgetPreservationContracts {
     Write-Host 'Validated budget start and end date preservation contracts.'
 }
 
+function Test-FinOpsTriggerScriptCache {
+    . (Join-Path $repositoryRoot 'hooks\finops-script-cache.ps1')
+    $subscriptionId = '00000000-0000-0000-0000-000000000001'
+    $groupId = "/subscriptions/$subscriptionId/resourceGroups/rg-test-finops"
+    $hubId = "$groupId/providers/Microsoft.Cloud/hubs/test-hub"
+    $content = Get-Content -LiteralPath (Join-Path $repositoryRoot 'infra\vendor\finops-toolkit\v14\release\modules\fx\scripts\Init-DataFactory.ps1') -Raw
+    $owned = @{
+        name = 'Microsoft.FinOpsHubs.Core_ADF.StopTriggers'
+        id = "$groupId/providers/Microsoft.Resources/deploymentScripts/Microsoft.FinOpsHubs.Core_ADF.StopTriggers"
+        type = 'Microsoft.Resources/deploymentScripts'
+        tags = @{ 'cm-resource-parent' = $hubId }
+        scriptContent = $content
+        provisioningState = 'Succeeded'
+    }
+    $foreign = $owned.Clone()
+    $foreign.tags = @{ 'cm-resource-parent' = "$hubId-other" }
+    $upload = $owned.Clone()
+    $upload.scriptContent = 'Write-Output "Upload schema"'
+    $arguments = @{ SubscriptionId = $subscriptionId; ResourceGroupName = 'rg-test-finops'; HubName = 'test-hub' }
+    $script:cacheList = @($owned, $foreign, $upload)
+    $script:cacheListExitCode = 0
+    $script:cacheDeleteExitCode = 0
+    $script:cacheDeletes = [System.Collections.Generic.List[string]]::new()
+    $previousExitCode = Get-Variable -Name LASTEXITCODE -Scope Global -ErrorAction SilentlyContinue
+    $previousExitCodeValue = if ($null -ne $previousExitCode) { $previousExitCode.Value } else { $null }
+    function az {
+        if ($args[0] -ne 'deployment-scripts') { throw 'Unexpected Azure command.' }
+        if ($args[1] -eq 'list') {
+            $global:LASTEXITCODE = $script:cacheListExitCode
+            ConvertTo-Json -InputObject $script:cacheList -Depth 10
+        }
+        elseif ($args[1] -eq 'delete') {
+            $global:LASTEXITCODE = $script:cacheDeleteExitCode
+            $script:cacheDeletes.Add($args[[array]::IndexOf($args, '--name') + 1])
+        }
+        else { throw 'Unexpected deployment-script action.' }
+    }
+    try {
+        Clear-FinOpsTriggerScriptCache @arguments
+        Assert-True ($script:cacheDeletes.Count -eq 1 -and $script:cacheDeletes[0] -ceq $owned.name) 'Only the exact owned upstream trigger script record may be cleared.'
+        $script:cacheList = @()
+        Clear-FinOpsTriggerScriptCache @arguments
+        Assert-True ($script:cacheDeletes.Count -eq 1) 'A first deployment must not delete any script records.'
+        foreach ($state in @('Running', 'Failed', 'Canceled')) {
+            $blocked = $owned.Clone()
+            $blocked.provisioningState = $state
+            $script:cacheList = @($owned, $blocked)
+            $failed = $false
+            try { Clear-FinOpsTriggerScriptCache @arguments } catch { $failed = $true }
+            Assert-True ($failed -and $script:cacheDeletes.Count -eq 1) 'Non-successful scripts must retain their logs and prevent any cache deletion.'
+        }
+        $outside = $owned.Clone()
+        $outside.id = '/subscriptions/other/resourceGroups/other/providers/Microsoft.Resources/deploymentScripts/other'
+        $script:cacheList = @($outside)
+        $failed = $false
+        try { Clear-FinOpsTriggerScriptCache @arguments } catch { $failed = $true }
+        Assert-True ($failed -and $script:cacheDeletes.Count -eq 1) 'A script with an unexpected resource ID must not be deleted.'
+        foreach ($response in @(@{}, $null)) {
+            $script:cacheList = $response
+            $failed = $false
+            try { Clear-FinOpsTriggerScriptCache @arguments } catch { $failed = $true }
+            Assert-True $failed 'Malformed script listings must stop deployment.'
+        }
+        $script:cacheList = @($owned)
+        $script:cacheListExitCode = 1
+        $failed = $false
+        try { Clear-FinOpsTriggerScriptCache @arguments } catch { $failed = $true }
+        Assert-True ($failed -and $script:cacheDeletes.Count -eq 1) 'Listing failures must stop before deleting script records.'
+        $script:cacheListExitCode = 0
+        $script:cacheDeleteExitCode = 1
+        $failed = $false
+        try { Clear-FinOpsTriggerScriptCache @arguments } catch { $failed = $true }
+        Assert-True $failed 'A failed cache deletion must stop deployment.'
+    }
+    finally {
+        if ($null -ne $previousExitCode) {
+            Set-Variable -Name LASTEXITCODE -Scope Global -Value $previousExitCodeValue
+        }
+        else {
+            Remove-Variable -Name LASTEXITCODE -Scope Global -ErrorAction SilentlyContinue
+        }
+        Remove-Variable -Name cacheList, cacheListExitCode, cacheDeleteExitCode, cacheDeletes -Scope Script
+    }
+    $hook = Get-Content -LiteralPath (Join-Path $repositoryRoot 'hooks\deploy-finops-hub.ps1') -Raw
+    Assert-True (
+        $hook.IndexOf('Clear-FinOpsTriggerScriptCache -SubscriptionId') -lt $hook.IndexOf('az deployment group create') -and
+        $hook.IndexOf('Clear-FinOpsTriggerScriptCache -SubscriptionId') -gt $hook.IndexOf('function Invoke-FinOpsDeployment')
+    ) 'Both FinOps deployment passes must clear cached trigger scripts before deployment.'
+    Write-Host 'Validated scoped FinOps trigger script cache handling.'
+}
+
 function Test-LocalAzdContracts {
     $predown = Get-Content -LiteralPath (Join-Path $repositoryRoot 'hooks\predown.ps1') -Raw
     $postdown = Get-Content -LiteralPath (Join-Path $repositoryRoot 'hooks\postdown.ps1') -Raw
@@ -402,6 +498,7 @@ try {
     Test-PowerShellSyntax @(
         'hooks\preprovision.ps1'
         'hooks\budget-period.ps1'
+        'hooks\finops-script-cache.ps1'
         'hooks\deploy-finops-hub.ps1'
         'hooks\postprovision.ps1'
         'hooks\predown.ps1'
@@ -410,6 +507,7 @@ try {
     )
     Test-PreprovisionContracts
     Test-BudgetPreservationContracts
+    Test-FinOpsTriggerScriptCache
     Test-EntraCleanupContracts
     Test-TeardownInheritedApprovalRegression
     Test-PostprovisionAuthContracts
