@@ -224,6 +224,11 @@ Use it for Event Hubs ingress, Capture status, processor lag, checkpoint status
 and age, allocation state, quarantine growth, DCR signals, FOCUS freshness, export
 failures, scope rejections, replay handling, and reconciliation residuals.
 
+The checkpoint, usage-freshness, allocation-freshness, and reconciliation alerts
+evaluate one current result. Their final query output omits `TimeGenerated`, so
+Azure requires one evaluation period. They alert on the first matching result.
+The configured age thresholds, query windows, and complete-run gates still apply.
+
 ### AI Usage and Cost Investigation Workbook
 
 Use the Workbook for filtered drill-downs:

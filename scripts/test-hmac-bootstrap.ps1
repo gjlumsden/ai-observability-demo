@@ -76,6 +76,15 @@ function Test-HmacBootstrapContracts {
     $identityVault = Get-Content -LiteralPath (Join-Path $repositoryRoot 'infra\modules\identity-vault.bicep') -Raw
 
     Assert-True (
+        $identityVault.Contains("azCliVersion: '2.89.0'")
+    ) 'The bootstrap must use the pinned Azure Linux execution image that includes jq.'
+    Assert-True (
+        $identityVault.Contains('for tool in curl jq openssl; do') -and
+        $identityVault.Contains('command -v "$tool"') -and
+        $identityVault.IndexOf('for tool in curl jq openssl; do') -lt $identityVault.IndexOf('for attempt in $(seq 1 60); do')
+    ) 'Missing bootstrap dependencies must fail before the Key Vault retry loop.'
+
+    Assert-True (
         $identityVault.Contains("--write-out '%{http_code}'")
     ) 'The HMAC bootstrap no longer records the Key Vault secret GET status code.'
     Assert-True (
@@ -284,12 +293,29 @@ function Test-CheckpointAlertContracts {
         $checkpointBlock.Contains("description: 'Detects partitions whose latest checkpoint status is stale, missing, or invalid while ignoring healthy, lagging, and idle partitions.'")
     ) 'The checkpoint health alert description must match the final status contract.'
     Assert-True (
-        $checkpointBlock.Contains('numberOfEvaluationPeriods: 3') -and
-        $checkpointBlock.Contains('minFailingPeriodsToAlert: 3')
-    ) 'The checkpoint health alert must require three of three failing evaluation periods.'
+        $checkpointBlock.Contains('numberOfEvaluationPeriods: 1') -and
+        $checkpointBlock.Contains('minFailingPeriodsToAlert: 1')
+    ) 'The latest checkpoint snapshot must use one evaluation period without a TimeGenerated projection.'
 
     Write-Host 'Validated checkpoint health alert JSON telemetry and outage filters.'
 }
+
+function Test-SnapshotAlertEvaluationContracts {
+    $alertsModule = Get-Content -LiteralPath (Join-Path $repositoryRoot 'infra\modules\usage-alerts.bicep') -Raw
+    foreach ($name in @('checkpointHealthAlert', 'staleUsageAlert', 'allocationStaleAlert', 'reconciliationDriftAlert')) {
+        $resource = [regex]::Match(
+            $alertsModule,
+            "(?ms)^resource $name 'Microsoft\.Insights/scheduledQueryRules@2023-12-01' = \{.*?^\}"
+        )
+        Assert-True $resource.Success "The snapshot alert $name is missing."
+        Assert-True (
+            $resource.Value -match '\bnumberOfEvaluationPeriods:\s*1\b' -and
+            $resource.Value -match '\bminFailingPeriodsToAlert:\s*1\b'
+        ) "The snapshot alert $name must use one evaluation period without a datetime output column."
+    }
+    Write-Host 'Validated single-period evaluation for snapshot log alerts.'
+}
+
 function Test-AllocationFreshnessAlertContracts {
     $alertsModule = Get-Content -LiteralPath (Join-Path $repositoryRoot 'infra\modules\usage-alerts.bicep') -Raw
     $freshnessStart = $alertsModule.IndexOf("resource allocationStaleAlert 'Microsoft.Insights/scheduledQueryRules@2023-12-01' = {")
@@ -413,6 +439,7 @@ try {
     Test-RemoteBuildFeedContracts
     Test-BlobDiagnosticsContracts
     Test-CheckpointAlertContracts
+    Test-SnapshotAlertEvaluationContracts
     Test-AllocationFreshnessAlertContracts
     Test-ReconciliationAlertContracts
     Test-MonitoringWorkbookContracts

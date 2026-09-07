@@ -73,10 +73,20 @@ repositories for reference.
 | `@azure/monitor-opentelemetry` | `src/web/` telemetry | [Azure/azure-sdk-for-js](https://github.com/Azure/azure-sdk-for-js) |
 | `azure-identity`, `azure-eventhub`, `azure-monitor-ingestion`, `azure-monitor-query`, `azure-mgmt-costmanagement`, `azure-storage-blob`, `azure-data-tables` | `src/usage-processor/` | [Azure/azure-sdk-for-python](https://github.com/Azure/azure-sdk-for-python) |
 | `azure-functions` | `src/usage-processor/` runtime | [Azure/azure-functions-python-library](https://github.com/Azure/azure-functions-python-library) |
+| Azure CLI 2.89.0 execution image | HMAC secret bootstrap in `infra/modules/identity-vault.bicep` | [Azure/azure-cli image definition](https://github.com/Azure/azure-cli/blob/azure-cli-2.89.0/azure-linux.dockerfile) |
 
 Using a package as a dependency differs from copying sample code. This project
 copies a sample shape only for the Claude deployment. See the
 [composition matrix](#composition-matrix).
+
+The HMAC bootstrap retains the Azure deployment-script service and managed identity.
+Its execution image includes `jq`, which the service wrapper and bootstrap require.
+Azure CLI 2.64.0 omitted that dependency; see
+[Azure/azure-cli#29830](https://github.com/Azure/azure-cli/issues/29830).
+The image pin does not constrain the operator's local Azure CLI.
+When updating it, follow Microsoft's
+[deployment-script image certification guidance](https://learn.microsoft.com/azure/azure-resource-manager/bicep/deployment-script-develop#syntax).
+Do not select an image released within the previous 30 days.
 
 The vendored FinOps files must remain byte-identical to the pinned archive.
 `.gitattributes` disables Git text conversion for that directory. This prevents
