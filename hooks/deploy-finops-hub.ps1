@@ -153,6 +153,12 @@ $functionPrincipalId = Get-RequiredValue $values 'USAGE_PROCESSOR_PRINCIPAL_ID'
 $functionIdentityClientId = Get-RequiredValue $values 'USAGE_PROCESSOR_IDENTITY_CLIENT_ID'
 $budgetAmount = [int](Get-RequiredValue $values 'FINOPS_SUPPORT_BUDGET_AMOUNT')
 $budgetStartDate = Get-RequiredValue $values 'FINOPS_BUDGET_START_DATE'
+$budgetEndDate = if ($values.ContainsKey('FINOPS_BUDGET_END_DATE')) {
+    [string]$values['FINOPS_BUDGET_END_DATE']
+}
+else {
+    ''
+}
 $notificationEmailList = if ($values.ContainsKey('FINOPS_NOTIFICATION_EMAILS')) {
     [string]$values['FINOPS_NOTIFICATION_EMAILS']
 }
@@ -202,6 +208,7 @@ $parameters = @{
         monthlyBudgetAmount = @{ value = $budgetAmount }
         notificationEmails = @{ value = $notificationEmails }
         budgetStartDate = @{ value = $budgetStartDate }
+        budgetEndDate = @{ value = $budgetEndDate }
         tags = @{
             value = @{
                 env = 'demo'

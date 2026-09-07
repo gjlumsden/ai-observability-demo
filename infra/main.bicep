@@ -34,11 +34,11 @@ param finOpsMonthlyBudgetAmount int = 100
 @description('Optional email recipients for the budget warning and critical alerts.')
 param costNotificationEmails string[] = []
 
-@description('First day of the active budget month in UTC.')
+@description('First day of the active budget month in UTC (yyyy-MM-dd). Always provided by the preprovision hook to preserve existing budget start dates.')
 param budgetStartDate string = utcNow('yyyy-MM-01')
 
-@description('A non-sensitive value that reruns the idempotent HMAC key bootstrap.')
-param hmacBootstrapRunId string = utcNow('yyyyMMddHHmmss')
+@description('Optional last day of the budget period in UTC (yyyy-MM-dd). Preserved from any existing budget by the preprovision hook.')
+param budgetEndDate string = ''
 
 // Naming convention:
 // - Hyphenated resources: ai-observability-demo-<component>-<suffix>
@@ -73,6 +73,7 @@ module costManagement 'modules/cost-management.bicep' = {
     monthlyBudgetAmount: monthlyBudgetAmount
     notificationEmails: costNotificationEmails
     budgetStartDate: budgetStartDate
+    budgetEndDate: budgetEndDate
   }
 }
 
@@ -82,7 +83,6 @@ module identityVault 'modules/identity-vault.bicep' = {
     location: usageLocation
     tags: tags
     resourceSuffix: resourceSuffix
-    hmacBootstrapRunId: hmacBootstrapRunId
   }
 }
 
@@ -292,7 +292,6 @@ output USAGE_EVENT_HUB_ID string = usageEventStream.outputs.eventHubId
 output USAGE_EVENT_HUB_CONSUMER_GROUP string = usageEventStream.outputs.consumerGroupName
 output USAGE_KEY_VAULT_NAME string = identityVault.outputs.keyVaultName
 output USAGE_HMAC_SECRET_NAME string = identityVault.outputs.secretName
-output HMAC_BOOTSTRAP_ROLE_ASSIGNMENT_ID string = identityVault.outputs.bootstrapRoleAssignmentId
 output USAGE_DCR_ID string = usageObservability.outputs.dataCollectionRuleId
 output USAGE_DCR_IMMUTABLE_ID string = usageObservability.outputs.dataCollectionRuleImmutableId
 output USAGE_DCR_ENDPOINT string = usageObservability.outputs.logsIngestionEndpoint
@@ -311,6 +310,7 @@ output FINOPS_HUB_NAME string = finOpsHubName
 output FINOPS_LOCATION string = usageLocation
 output FINOPS_SUPPORT_BUDGET_AMOUNT int = finOpsMonthlyBudgetAmount
 output FINOPS_BUDGET_START_DATE string = budgetStartDate
+output FINOPS_BUDGET_END_DATE string = budgetEndDate
 output FINOPS_NOTIFICATION_EMAILS string = join(costNotificationEmails, ';')
 output GRAFANA_DASHBOARD_ID string = grafanaDashboard.outputs.dashboardId
 output WEATHER_MCP_API_URL string = weatherMcp.outputs.mcpServerUrl

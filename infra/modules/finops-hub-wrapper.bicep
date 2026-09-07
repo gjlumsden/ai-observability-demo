@@ -22,8 +22,11 @@ param monthlyBudgetAmount int = 100
 @description('Optional email recipients for support resource-group budget notifications.')
 param notificationEmails string[] = []
 
-@description('First day of the active budget month in UTC.')
+@description('First day of the active budget month in UTC (yyyy-MM-dd).')
 param budgetStartDate string
+
+@description('Optional last day of the budget period in UTC (yyyy-MM-dd). Omit for open-ended budgets.')
+param budgetEndDate string = ''
 
 var mainResourceGroupId = subscriptionResourceId('Microsoft.Resources/resourceGroups', mainResourceGroupName)
 var notifications = length(notificationEmails) > 0
@@ -135,15 +138,17 @@ resource managedExportFailureAlert 'Microsoft.Insights/metricAlerts@2018-03-01' 
   }
 }
 
+var supportBudgetTimePeriod = budgetEndDate != ''
+  ? { startDate: budgetStartDate, endDate: budgetEndDate }
+  : { startDate: budgetStartDate }
+
 resource supportBudget 'Microsoft.Consumption/budgets@2024-08-01' = {
   name: '${hubName}-support-budget'
   properties: {
     amount: monthlyBudgetAmount
     category: 'Cost'
     timeGrain: 'Monthly'
-    timePeriod: {
-      startDate: budgetStartDate
-    }
+    timePeriod: supportBudgetTimePeriod
     notifications: notifications
   }
 }

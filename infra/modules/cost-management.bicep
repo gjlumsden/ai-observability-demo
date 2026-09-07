@@ -17,8 +17,11 @@ param criticalThreshold int = 90
 @description('Optional email recipients for budget notifications.')
 param notificationEmails string[] = []
 
-@description('First day of the budget month in UTC.')
+@description('First day of the budget month in UTC (yyyy-MM-dd).')
 param budgetStartDate string
+
+@description('Optional last day of the budget period in UTC (yyyy-MM-dd). Omit for open-ended budgets.')
+param budgetEndDate string = ''
 
 var notifications = length(notificationEmails) > 0
   ? {
@@ -45,15 +48,17 @@ var notifications = length(notificationEmails) > 0
     }
   : {}
 
+var timePeriod = budgetEndDate != ''
+  ? { startDate: budgetStartDate, endDate: budgetEndDate }
+  : { startDate: budgetStartDate }
+
 resource monthlyBudget 'Microsoft.Consumption/budgets@2024-08-01' = {
   name: 'ai-observability-demo-monthly-budget'
   properties: {
     amount: monthlyBudgetAmount
     category: 'Cost'
     timeGrain: 'Monthly'
-    timePeriod: {
-      startDate: budgetStartDate
-    }
+    timePeriod: timePeriod
     notifications: notifications
   }
 }

@@ -73,54 +73,71 @@ function Test-BicepBuilds {
 }
 
 function Test-HmacBootstrapContracts {
+    $preprovision = Get-Content -LiteralPath (Join-Path $repositoryRoot 'hooks\preprovision.ps1') -Raw
     $identityVault = Get-Content -LiteralPath (Join-Path $repositoryRoot 'infra\modules\identity-vault.bicep') -Raw
+    $postprovision = Get-Content -LiteralPath (Join-Path $repositoryRoot 'hooks\postprovision.ps1') -Raw
 
+    # identity-vault.bicep must not contain any deployment script (shared-key storage is prohibited).
     Assert-True (
-        $identityVault.Contains("--write-out '%{http_code}'")
-    ) 'The HMAC bootstrap no longer records the Key Vault secret GET status code.'
+        -not $identityVault.Contains('deploymentScripts')
+    ) 'identity-vault.bicep must not use Microsoft.Resources/deploymentScripts after migrating to preprovision bootstrap.'
     Assert-True (
-        $identityVault.Contains('case "$secret_status" in')
-    ) 'The HMAC bootstrap must branch on the Key Vault secret GET status.'
+        -not $identityVault.Contains('secretBootstrapIdentity')
+    ) 'identity-vault.bicep must not contain the obsolete bootstrap managed identity.'
     Assert-True (
-        $identityVault.Contains('create_secret() {')
-    ) 'The HMAC bootstrap must keep the secret-creation helper.'
-    Assert-True (
-        $identityVault.Contains('if ! secret_status="$(curl --silent --show-error \')
-    ) 'The HMAC bootstrap must retry transport failures without creating a secret.'
-    Assert-True (
-        $identityVault.Contains('if [ -z "$token" ] || [ "$token" = ''null'' ]; then')
-    ) 'The HMAC bootstrap must reject missing managed-identity access tokens.'
+        -not $identityVault.Contains('hmacBootstrapRunId')
+    ) 'identity-vault.bicep must not reference the obsolete forceUpdateTag parameter.'
 
-    $createSecretStart = $identityVault.IndexOf('create_secret() {')
-    $createSecretEnd = $identityVault.IndexOf('for attempt in $(seq 1 60); do', $createSecretStart)
-    $existingStart = $identityVault.IndexOf('200)')
-    $missingStart = $identityVault.IndexOf('404)')
-    $fallbackStart = $identityVault.IndexOf('*)')
-    $esacIndex = $identityVault.IndexOf('esac', $fallbackStart)
-
-    Assert-True ($createSecretStart -ge 0 -and $createSecretEnd -gt $createSecretStart) 'The secret-creation helper block is missing.'
-    Assert-True ($existingStart -ge 0 -and $missingStart -gt $existingStart) 'The existing-secret branch is missing from the HMAC bootstrap.'
-    Assert-True ($fallbackStart -gt $missingStart -and $esacIndex -gt $fallbackStart) 'The transient-failure branch is missing from the HMAC bootstrap.'
-
-    $createSecretBlock = $identityVault.Substring($createSecretStart, $createSecretEnd - $createSecretStart)
-    $existingBranch = $identityVault.Substring($existingStart, $missingStart - $existingStart)
-    $missingBranch = $identityVault.Substring($missingStart, $fallbackStart - $missingStart)
-    $fallbackBranch = $identityVault.Substring($fallbackStart, $esacIndex - $fallbackStart)
-
+    # Preprovision hook must own the HMAC bootstrap from start to finish.
     Assert-True (
-        $createSecretBlock.Contains('-X PUT')
-    ) 'The HMAC bootstrap must keep the secret creation PUT operation.'
+        $preprovision.Contains('usage-hmac-key')
+    ) 'The preprovision hook must reference the HMAC secret name.'
     Assert-True (
-        -not $existingBranch.Contains('create_secret') -and -not $existingBranch.Contains('-X PUT')
-    ) 'The HMAC bootstrap must not rotate an existing secret.'
+        $preprovision.Contains('hmac-kv-prep.bicep')
+    ) 'The preprovision hook must deploy the foundation bootstrap Bicep.'
     Assert-True (
-        $missingBranch.Contains('create_secret')
-    ) 'The HMAC bootstrap must create the secret after a confirmed 404 response.'
-    Assert-True (
-        -not $fallbackBranch.Contains('create_secret') -and -not $fallbackBranch.Contains('-X PUT')
-    ) 'The HMAC bootstrap must not create or rotate the secret after a transient or authorization failure.'
+        $preprovision.Contains('AZURE_PRINCIPAL_ID')
+    ) 'The preprovision hook must use the deploying principal ID for the temporary role.'
 
-    Write-Host 'Validated HMAC bootstrap existing, missing, and transient-failure contracts.'
+    # Secret is created only after a confirmed 404; existing secret is never rotated.
+    $notFoundIndex = $preprovision.IndexOf('SecretNotFound|ItemNotFound')
+    Assert-True (
+        $notFoundIndex -ge 0
+    ) 'The preprovision hook must match the SecretNotFound|ItemNotFound pattern for confirmed-missing secrets.'
+    $createIndex = $preprovision.IndexOf('RandomNumberGenerator', $notFoundIndex)
+    Assert-True (
+        $createIndex -gt $notFoundIndex
+    ) 'The preprovision hook must generate the HMAC secret bytes only after a confirmed SecretNotFound response.'
+    Assert-True (
+        $preprovision.Contains('RandomNumberGenerator')
+    ) 'The preprovision hook must generate the HMAC secret using .NET RandomNumberGenerator.'
+
+    # Forbidden / Unauthorized errors must surface as hard failures, not silent fallbacks.
+    Assert-True (
+        $preprovision.Contains('Forbidden|Unauthorized|does not have|AKV403|403')
+    ) 'The preprovision hook must distinguish authorization failures from not-found responses.'
+
+    # The temporary role must be removed in a finally block after the secret is confirmed.
+    $finallyIndex = $preprovision.IndexOf('} finally {', $preprovision.IndexOf('hmac-kv-prep.bicep'))
+    $roleRemovalIndex = $preprovision.IndexOf('bootstrapRoleId', $finallyIndex)
+    Assert-True (
+        $finallyIndex -ge 0 -and $roleRemovalIndex -gt $finallyIndex
+    ) 'The preprovision hook must remove the temporary bootstrap role in a finally block.'
+
+    # The secret value must not be logged.
+    $secretValueAssign = $preprovision.IndexOf('$secretValue = [Convert]::ToBase64String')
+    $writeHostAfterAssign = $preprovision.IndexOf('Write-Host', $secretValueAssign)
+    $nullAfterAssign = $preprovision.IndexOf('$secretValue = $null', $secretValueAssign)
+    Assert-True (
+        $nullAfterAssign -gt 0 -and ($writeHostAfterAssign -eq -1 -or $writeHostAfterAssign -gt $nullAfterAssign)
+    ) 'The preprovision hook must null the secret value before any Write-Host call.'
+
+    # postprovision must no longer reference the removed bootstrap role output.
+    Assert-True (
+        -not $postprovision.Contains('HMAC_BOOTSTRAP_ROLE_ASSIGNMENT_ID')
+    ) 'The postprovision hook must not reference the obsolete HMAC bootstrap role assignment.'
+
+    Write-Host 'Validated HMAC bootstrap preprovision contracts.'
 }
 
 function Test-AllocationObservabilityContracts {
@@ -398,9 +415,12 @@ function Test-MonitoringWorkbookContracts {
 Push-Location $repositoryRoot
 try {
     Test-BicepBuilds @(
+        'infra\bootstrap\hmac-kv-prep.bicep'
         'infra\modules\app-service.bicep'
+        'infra\modules\cost-management.bicep'
         'infra\modules\identity-vault.bicep'
         'infra\modules\monitoring.bicep'
+        'infra\modules\usage-observability.bicep'
         'infra\modules\usage-processor.bicep'
         'infra\modules\usage-storage.bicep'
         'infra\modules\usage-alerts.bicep'

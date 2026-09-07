@@ -10,6 +10,15 @@
     },
     "principalId": {
       "value": "${AZURE_PRINCIPAL_ID}"
+    },
+    "resourceSuffix": {
+      "value": "${AZURE_RESOURCE_SUFFIX}"
+    },
+    "budgetStartDate": {
+      "value": "${BUDGET_START_DATE}"
+    },
+    "budgetEndDate": {
+      "value": "${BUDGET_END_DATE}"
     }
   }
 }

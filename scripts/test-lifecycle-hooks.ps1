@@ -254,6 +254,46 @@ function Test-PostprovisionAuthContracts {
     Write-Host 'Validated postprovision Easy Auth integration contracts.'
 }
 
+function Test-BudgetPreservationContracts {
+    $preprovision = Get-Content -LiteralPath (Join-Path $repositoryRoot 'hooks\preprovision.ps1') -Raw
+    $mainParameters = Get-Content -LiteralPath (Join-Path $repositoryRoot 'infra\main.parameters.json') -Raw
+    $deployFinOps = Get-Content -LiteralPath (Join-Path $repositoryRoot 'hooks\deploy-finops-hub.ps1') -Raw
+
+    # Preprovision must read and preserve the existing budget dates.
+    Assert-True (
+        $preprovision.Contains('BUDGET_START_DATE')
+    ) 'The preprovision hook must set BUDGET_START_DATE in the azd environment.'
+    Assert-True (
+        $preprovision.Contains('BUDGET_END_DATE')
+    ) 'The preprovision hook must set BUDGET_END_DATE in the azd environment.'
+    Assert-True (
+        $preprovision.Contains('timePeriod') -and $preprovision.Contains('startDate')
+    ) 'The preprovision hook must read the existing budget timePeriod from Azure.'
+    Assert-True (
+        $preprovision.Contains('AuthorizationFailed|Forbidden|does not have.*permission|403')
+    ) 'The preprovision hook must fail explicitly on authorization errors when reading the budget.'
+    Assert-True (
+        @(($preprovision -split '\n') | Where-Object {
+            $_ -match '20[0-9]{2}-[0-9]{2}-[0-9]{2}' -and $_ -notmatch '(?i)api[- ]?version'
+        }).Count -eq 0
+    ) 'The preprovision hook must not hardcode specific dates outside of api-version strings.'
+
+    # main.parameters.json must reference both budget date env vars.
+    Assert-True (
+        $mainParameters.Contains('BUDGET_START_DATE')
+    ) 'The main parameter file must reference BUDGET_START_DATE.'
+    Assert-True (
+        $mainParameters.Contains('BUDGET_END_DATE')
+    ) 'The main parameter file must reference BUDGET_END_DATE.'
+
+    # deploy-finops-hub.ps1 must forward the end date to the FinOps wrapper.
+    Assert-True (
+        $deployFinOps.Contains('FINOPS_BUDGET_END_DATE') -and $deployFinOps.Contains('budgetEndDate')
+    ) 'The FinOps deployment hook must read FINOPS_BUDGET_END_DATE and pass budgetEndDate to the Bicep deployment.'
+
+    Write-Host 'Validated budget start and end date preservation contracts.'
+}
+
 function Test-LocalAzdContracts {
     $predown = Get-Content -LiteralPath (Join-Path $repositoryRoot 'hooks\predown.ps1') -Raw
     $postdown = Get-Content -LiteralPath (Join-Path $repositoryRoot 'hooks\postdown.ps1') -Raw
@@ -282,6 +322,7 @@ try {
         'demo-scripts\teardown.ps1'
     )
     Test-PreprovisionContracts
+    Test-BudgetPreservationContracts
     Test-EntraCleanupContracts
     Test-TeardownInheritedApprovalRegression
     Test-PostprovisionAuthContracts
