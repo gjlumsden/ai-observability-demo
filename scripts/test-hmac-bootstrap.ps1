@@ -182,6 +182,26 @@ function Test-FlexConsumptionRuntimeContracts {
     Write-Host 'Validated Flex Consumption runtime and checkpoint threshold settings.'
 }
 
+function Test-RemoteBuildFeedContracts {
+    $processorModule = Get-Content -LiteralPath (Join-Path $repositoryRoot 'infra\modules\usage-processor.bicep') -Raw
+    $appServiceModule = Get-Content -LiteralPath (Join-Path $repositoryRoot 'infra\modules\app-service.bicep') -Raw
+
+    Assert-True (
+        $processorModule.Contains("PIP_INDEX_URL: 'https://packagefeedproxy.microsoft.io/pypi/simple'")
+    ) 'The Flex Consumption Function App must set PIP_INDEX_URL for remote Python builds.'
+    Assert-True (
+        $appServiceModule -match "(?s)name: 'SCM_DO_BUILD_DURING_DEPLOYMENT'\s+value: 'true'"
+    ) 'The web app must keep SCM_DO_BUILD_DURING_DEPLOYMENT enabled for remote builds.'
+    Assert-True (
+        $appServiceModule -match "(?s)name: 'NPM_CONFIG_REGISTRY'\s+value: 'https://packagefeedproxy.microsoft.io/npm/'"
+    ) 'The web app must set NPM_CONFIG_REGISTRY for remote npm builds.'
+    Assert-True (
+        -not $appServiceModule.Contains('NPM_CONFIG_REPLACE_REGISTRY_HOST')
+    ) 'The web app must not set NPM_CONFIG_REPLACE_REGISTRY_HOST.'
+
+    Write-Host 'Validated remote build package feed contracts.'
+}
+
 function Test-BlobDiagnosticsContracts {
     $storageModule = Get-Content -LiteralPath (Join-Path $repositoryRoot 'infra\modules\usage-storage.bicep') -Raw
     $alertsModule = Get-Content -LiteralPath (Join-Path $repositoryRoot 'infra\modules\usage-alerts.bicep') -Raw
@@ -378,6 +398,7 @@ function Test-MonitoringWorkbookContracts {
 Push-Location $repositoryRoot
 try {
     Test-BicepBuilds @(
+        'infra\modules\app-service.bicep'
         'infra\modules\identity-vault.bicep'
         'infra\modules\monitoring.bicep'
         'infra\modules\usage-processor.bicep'
@@ -387,6 +408,7 @@ try {
     Test-HmacBootstrapContracts
     Test-AllocationObservabilityContracts
     Test-FlexConsumptionRuntimeContracts
+    Test-RemoteBuildFeedContracts
     Test-BlobDiagnosticsContracts
     Test-CheckpointAlertContracts
     Test-AllocationFreshnessAlertContracts

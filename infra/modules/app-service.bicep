@@ -74,6 +74,10 @@ resource webApp 'Microsoft.Web/sites@2024-04-01' = {
           value: 'true'
         }
         {
+          name: 'NPM_CONFIG_REGISTRY'
+          value: 'https://packagefeedproxy.microsoft.io/npm/'
+        }
+        {
           name: 'APIM_BASE_URL'
           value: apimBaseUrl
         }

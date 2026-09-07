@@ -283,6 +283,7 @@ resource functionAppSettings 'Microsoft.Web/sites/config@2024-04-01' = {
     AzureWebJobsStorage__credential: 'managedidentity'
     AzureWebJobsStorage__clientId: processorIdentity.properties.clientId
     AzureWebJobsSecretStorageType: 'blob'
+    PIP_INDEX_URL: 'https://packagefeedproxy.microsoft.io/pypi/simple'
     AIUsageEventHub__fullyQualifiedNamespace: eventHubNamespaceFullyQualifiedName
     AIUsageEventHub__credential: 'managedidentity'
     AIUsageEventHub__clientId: processorIdentity.properties.clientId
