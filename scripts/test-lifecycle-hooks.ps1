@@ -393,6 +393,7 @@ function Test-FinOpsTriggerScriptCache {
             ConvertTo-Json -InputObject $script:cacheList -Depth 10
         }
         elseif ($args[1] -eq 'delete') {
+            Assert-True ($args -contains '--yes') 'Cache cleanup must not prompt in noninteractive deployment hooks.'
             $global:LASTEXITCODE = $script:cacheDeleteExitCode
             $script:cacheDeletes.Add($args[[array]::IndexOf($args, '--name') + 1])
         }

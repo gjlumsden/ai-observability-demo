@@ -46,7 +46,7 @@ function Clear-FinOpsTriggerScriptCache {
         Write-Host "Clearing completed FinOps trigger script record: $($resource['name'])"
         $output = & az deployment-scripts delete --subscription $SubscriptionId `
             --resource-group $ResourceGroupName --name $resource['name'] `
-            --only-show-errors 2>&1
+            --yes --only-show-errors 2>&1
         if ($LASTEXITCODE -ne 0) {
             throw "Could not clear FinOps trigger script $($resource['name']): $($output -join "`n")"
         }
