@@ -181,11 +181,31 @@ if ($LASTEXITCODE -ne 0) {
     throw "Could not select Azure subscription $subscriptionId."
 }
 
+# Read any existing resource group tags before creating/updating, so that
+# environment-level tags (for example, security-control tags applied by the
+# subscription owner) are preserved alongside the workload-specific tags.
+$existingFinOpsTagsJson = & az group show `
+    --subscription $subscriptionId `
+    --name $finOpsResourceGroupName `
+    --query tags `
+    --output json 2>$null
+$finOpsTagList = [System.Collections.Generic.List[string]]@(
+    'workload=ai-observability'
+    'component=finops-hub'
+)
+if ($LASTEXITCODE -eq 0 -and $existingFinOpsTagsJson -and ($existingFinOpsTagsJson -join "`n").Trim() -ne 'null') {
+    $existingFinOpsTags = ($existingFinOpsTagsJson -join "`n" | ConvertFrom-Json)
+    foreach ($prop in $existingFinOpsTags.PSObject.Properties) {
+        if (-not ($finOpsTagList | Where-Object { $_ -like "$($prop.Name)=*" })) {
+            $finOpsTagList.Add("$($prop.Name)=$($prop.Value)")
+        }
+    }
+}
 & az group create `
     --subscription $subscriptionId `
     --name $finOpsResourceGroupName `
     --location $finOpsLocation `
-    --tags workload=ai-observability component=finops-hub `
+    --tags @finOpsTagList `
     --only-show-errors `
     --output none
 if ($LASTEXITCODE -ne 0) {

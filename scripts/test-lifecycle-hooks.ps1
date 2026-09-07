@@ -298,6 +298,7 @@ function Test-LocalAzdContracts {
     $predown = Get-Content -LiteralPath (Join-Path $repositoryRoot 'hooks\predown.ps1') -Raw
     $postdown = Get-Content -LiteralPath (Join-Path $repositoryRoot 'hooks\postdown.ps1') -Raw
     $deployFinOps = Get-Content -LiteralPath (Join-Path $repositoryRoot 'hooks\deploy-finops-hub.ps1') -Raw
+    $preprovision = Get-Content -LiteralPath (Join-Path $repositoryRoot 'hooks\preprovision.ps1') -Raw
 
     Assert-True (
         $predown.Contains('azd env get-values --cwd $repoRoot 2>$null')
@@ -309,7 +310,25 @@ function Test-LocalAzdContracts {
         $deployFinOps.Contains("Join-Path `$env:USERPROFILE '.azure\bin\bicep.exe'")
     ) 'The FinOps deployment hook must use the Azure CLI Bicep executable path directly on Windows.'
 
-    Write-Host 'Validated local azd and FinOps wrapper contracts.'
+    # Tag preservation: existing RG tags must survive az group create calls.
+    # The FinOps hook reads tags before creating so env-level tags are not silently replaced.
+    $finOpsGroupShowIdx = $deployFinOps.IndexOf('az group show')
+    $finOpsGroupCreateIdx = $deployFinOps.IndexOf('az group create')
+    Assert-True (
+        $finOpsGroupShowIdx -ge 0 -and $finOpsGroupCreateIdx -gt $finOpsGroupShowIdx
+    ) 'The FinOps deployment hook must read existing resource group tags before creating/updating the group.'
+    Assert-True (
+        -not $deployFinOps.Contains('SecurityControl')
+    ) 'The FinOps deployment hook must not hardcode environment-specific security control tags.'
+    # KV recovery calls az group create without --tags so ARM preserves existing tags.
+    $recoveryCreateIdx = $preprovision.IndexOf('az group create', $preprovision.IndexOf('Recovering purge-protected Key Vault'))
+    $recoveryTagsIdx = $preprovision.IndexOf('--tags', $recoveryCreateIdx)
+    $recoveryNextNewline = $preprovision.IndexOf("`n--only-show-errors", $recoveryCreateIdx)
+    Assert-True (
+        $recoveryCreateIdx -ge 0 -and ($recoveryTagsIdx -eq -1 -or ($recoveryNextNewline -ge 0 -and $recoveryTagsIdx -gt $recoveryNextNewline))
+    ) 'The KV recovery az group create call must not pass --tags to avoid overwriting existing RG tags.'
+
+    Write-Host 'Validated local azd, FinOps wrapper, and RG tag-preservation contracts.'
 }
 
 Push-Location $repositoryRoot

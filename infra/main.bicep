@@ -40,6 +40,9 @@ param budgetStartDate string = utcNow('yyyy-MM-01')
 @description('Optional last day of the budget period in UTC (yyyy-MM-dd). Preserved from any existing budget by the preprovision hook.')
 param budgetEndDate string = ''
 
+@description('A non-sensitive value that reruns the idempotent HMAC key bootstrap.')
+param hmacBootstrapRunId string = utcNow('yyyyMMddHHmmss')
+
 // Naming convention:
 // - Hyphenated resources: ai-observability-demo-<component>-<suffix>
 // - Globally-unique no-hyphen resources: aiobservability<component><suffix>
@@ -83,6 +86,7 @@ module identityVault 'modules/identity-vault.bicep' = {
     location: usageLocation
     tags: tags
     resourceSuffix: resourceSuffix
+    hmacBootstrapRunId: hmacBootstrapRunId
   }
 }
 
@@ -292,6 +296,7 @@ output USAGE_EVENT_HUB_ID string = usageEventStream.outputs.eventHubId
 output USAGE_EVENT_HUB_CONSUMER_GROUP string = usageEventStream.outputs.consumerGroupName
 output USAGE_KEY_VAULT_NAME string = identityVault.outputs.keyVaultName
 output USAGE_HMAC_SECRET_NAME string = identityVault.outputs.secretName
+output HMAC_BOOTSTRAP_ROLE_ASSIGNMENT_ID string = identityVault.outputs.bootstrapRoleAssignmentId
 output USAGE_DCR_ID string = usageObservability.outputs.dataCollectionRuleId
 output USAGE_DCR_IMMUTABLE_ID string = usageObservability.outputs.dataCollectionRuleImmutableId
 output USAGE_DCR_ENDPOINT string = usageObservability.outputs.logsIngestionEndpoint

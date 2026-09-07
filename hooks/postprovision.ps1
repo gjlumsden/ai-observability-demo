@@ -114,6 +114,27 @@ if (-not $existingClientId -and $values.ContainsKey('ENTRA_CLIENT_ID')) {
     $existingClientId = $values['ENTRA_CLIENT_ID']
 }
 
+$bootstrapRoleAssignmentId = Get-RequiredValue $values 'HMAC_BOOTSTRAP_ROLE_ASSIGNMENT_ID'
+$bootstrapRoleOutput = & az role assignment delete `
+    --only-show-errors `
+    --ids $bootstrapRoleAssignmentId 2>&1
+$bootstrapRoleExitCode = $LASTEXITCODE
+if ($bootstrapRoleExitCode -ne 0 -and ($bootstrapRoleOutput -join "`n") -notmatch 'RoleAssignmentNotFound|could not be found') {
+    for ($attempt = 1; $attempt -le 5; $attempt++) {
+        Start-Sleep -Seconds 10
+        $bootstrapRoleOutput = & az role assignment delete `
+            --only-show-errors `
+            --ids $bootstrapRoleAssignmentId 2>&1
+        $bootstrapRoleExitCode = $LASTEXITCODE
+        if ($bootstrapRoleExitCode -eq 0 -or ($bootstrapRoleOutput -join "`n") -match 'RoleAssignmentNotFound|could not be found') {
+            break
+        }
+    }
+    if ($bootstrapRoleExitCode -ne 0 -and ($bootstrapRoleOutput -join "`n") -notmatch 'RoleAssignmentNotFound|could not be found') {
+        throw "Temporary HMAC bootstrap access removal failed: $($bootstrapRoleOutput -join "`n")"
+    }
+}
+
 & (Join-Path $PSScriptRoot 'deploy-finops-hub.ps1')
 $values = Get-AzdEnvironmentValues
 
