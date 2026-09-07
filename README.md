@@ -64,7 +64,7 @@ App Service uses `AZURE_LOCATION` by default. Set an override only when required
 azd env set AZURE_APP_SERVICE_LOCATION <app-service-location>
 ```
 
-The deployment hooks configure the Entra application, secure session settings,
+The deployment hooks configure the Entra application, App Service Authentication,
 APIM audience, weather MCP connection, Foundry weather agent, and FinOps hub.
 The FinOps hook uses two passes. It first deploys the hub, then grants its Data
 Factory identity access to the main resource group. The second pass enables the
@@ -83,19 +83,24 @@ lifecycle hooks remove both active resource groups and their external role
 assignments. It does not purge the purge-protected Key Vault or remove the Entra
 app registration created by the post-provision hook.
 
-Run the complete cleanup command:
+Use the teardown wrapper to remove the active Azure deployment:
 
 ```powershell
-pwsh ./demo-scripts/teardown.ps1
+pwsh .\demo-scripts\teardown.ps1
 ```
 
 The script requires confirmation. It runs `azd down --force --purge` first.
 It then checks both resource groups, purges deleted Foundry and API Management
-services, deletes the app registration recorded in `ENTRA_CLIENT_ID`, and removes
-the local `azd` environment. Key Vault purge protection keeps deleted vault data
+services, and retains the Entra app registration and local `azd` environment.
+Use `-DeleteEntraApplication` only with explicit approval to remove the registration.
+That option requires a separate confirmation. Key Vault purge protection keeps deleted vault data
 recoverable for its Azure retention period. A later `azd up` recovers the vault
 when its name is still reserved. The Claude Marketplace subscription remains
 outside the resource groups and requires a separate review.
+
+Do not use full teardown for an in-place upgrade. If the preprovision hook finds
+legacy billing resources, it stops without deleting them. Approve a targeted
+migration or use a separate environment before deploying the new pipeline.
 
 ## Present the demo
 

@@ -58,11 +58,22 @@ Run a Bicep build:
 az bicep build --file .\infra\main.bicep --stdout | Out-Null
 ```
 
-Run the Azure Developer CLI provider preview:
+Run a direct ARM Provider preview with the active environment's resolved values:
 
 ```powershell
-azd provision --preview --environment <environment> --no-prompt
+az deployment group what-if `
+  --subscription <subscription-id> `
+  --resource-group <main-resource-group> `
+  --template-file .\infra\main.bicep `
+  --parameters "location=<azure-location>" "appServiceLocation=<app-service-location>" "principalId=<entra-object-id>" `
+  --validation-level Provider `
+  --no-pretty-print `
+  --output json
 ```
+
+Do not pass the unresolved `azd` parameter file directly to Azure CLI.
+Do not run deployment hooks as a read-only preflight. The preprovision hook can
+recover a soft-deleted Key Vault. A direct ARM preview does not run that hook.
 
 Run the deterministic attribution check:
 
@@ -111,7 +122,7 @@ The post-provision hook:
 
 - Creates or reuses the AI Observability Demo Entra application.
 - Creates the `access_as_user` delegated scope.
-- Generates a secure web session secret.
+- Configures the App Service identity provider and token store.
 - Updates the APIM Entra audience.
 - Updates web application authentication settings.
 - Deploys Microsoft FinOps hubs v14 in `<main-resource-group>-finops`.
@@ -131,9 +142,15 @@ The support resource group has a separate monthly budget. Its default amount is
 100 in the subscription billing currency. The support group is excluded from
 the monitored FOCUS dataset.
 
-The pre-provision hook registers required providers and checks all required
-subscription permissions. It also removes resources from the legacy financial
-pipeline when they exist.
+The pre-provision hook checks provider registration and required subscription
+permissions. It reports missing providers without registering them.
+It also rejects legacy financial resources without deleting them.
+
+For an in-place upgrade, inspect the exact legacy resource IDs and obtain
+explicit cleanup or migration approval. Preserve billing history unless its
+deletion is approved. Retain unrelated resources and the Entra app registration.
+Do not run the full teardown wrapper when the upgrade must preserve the app,
+Foundry deployments, APIM, or workspace.
 
 The post-deploy hook checks the web health endpoint.
 It also installs the pinned Foundry Connections extension, configures the encrypted MCP connection, and upserts `weather-forecast-agent`.
@@ -596,15 +613,15 @@ The `azd` pre-down and post-down hooks remove external role assignments and both
 active resource groups. They do not remove the Entra app registration because
 the post-provision hook creates it outside the Bicep deployment.
 
-Run the complete cleanup command:
+Use the teardown wrapper to remove the active Azure deployment:
 
 ```powershell
-pwsh ./demo-scripts/teardown.ps1
+pwsh .\demo-scripts\teardown.ps1
 ```
 
 The script:
 
-1. Reads `ENTRA_CLIENT_ID` before it removes the `azd` environment.
+1. Reads `ENTRA_CLIENT_ID` from the active `azd` environment.
 2. Requires the exact confirmation text `delete ai observability demo`.
 3. Runs `azd down --force --purge`.
 4. Removes the Data Factory and Function external role assignments.
@@ -612,8 +629,8 @@ The script:
 6. Checks whether the main resource group still exists.
 7. Deletes the main group directly if `azd` left resources.
 8. Purges soft-deleted Foundry and API Management services.
-9. Deletes the Entra app registration after Azure resource deletion succeeds.
-10. Removes the local `azd` environment.
+9. Retains the Entra app registration unless separate deletion approval was supplied.
+10. Retains the local `azd` environment for reuse.
 11. Returns a nonzero exit code if any cleanup stage is incomplete.
 
 The Azure deletion removes active resources, dashboards, tables, budgets,
@@ -627,4 +644,7 @@ deployment. This behavior preserves the HMAC pseudonym key across recovery.
 The Claude Marketplace subscription is outside the resource group. Review or
 remove that subscription separately when it is no longer required.
 
-The confirmation applies to both the Azure resources and the Entra app registration.
+The initial confirmation applies only to the Azure resource teardown.
+To also delete the Entra app registration, pass `-DeleteEntraApplication`.
+The wrapper then requires the separate text `delete Entra app registration`.
+If that confirmation is declined, it retains the registration.
