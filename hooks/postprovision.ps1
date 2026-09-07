@@ -175,6 +175,7 @@ if (-not $app) {
         '--display-name', $displayName,
         '--web-redirect-uris', $redirectUri,
         '--sign-in-audience', 'AzureADMyOrg',
+        '--enable-id-token-issuance', 'true',
         '--output', 'json'
     )
 }
@@ -185,6 +186,7 @@ else {
         '--id', $app.appId,
         '--display-name', $displayName,
         '--web-redirect-uris', $redirectUri,
+        '--enable-id-token-issuance', 'true',
         '--output', 'none'
     )
 }

@@ -215,6 +215,9 @@ function Test-PostprovisionAuthContracts {
         -not $postprovision.Contains('$webAppUrl/auth/callback')
     ) 'The postprovision hook must use the Easy Auth redirect URI.'
     Assert-True (
+        $postprovision.Contains("'--enable-id-token-issuance', 'true'")
+    ) 'The Entra application must enable ID token issuance for the Easy Auth response_type.'
+    Assert-True (
         $postprovision.Contains("Write-Host 'Configuring App Service authentication' -ForegroundColor Cyan")
     ) 'The postprovision hook must label the Easy Auth configuration step clearly.'
     Assert-True (
