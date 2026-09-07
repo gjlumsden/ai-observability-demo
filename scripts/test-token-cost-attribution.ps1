@@ -232,6 +232,30 @@ function Test-DashboardContracts {
     Assert-True (
         -not $dashboardText.Contains('\"dimensionFilters\"')
     ) 'A dashboard metric target filters on a dimension unavailable in its Azure metric definition.'
+    $metricTargets = @(
+        $bundle.operations.panels |
+            ForEach-Object {
+                if ($_.PSObject.Properties['targets']) {
+                    $_.targets
+                }
+            } |
+            Where-Object { $_.queryType -eq 'Azure Monitor' }
+    )
+    Assert-True ($metricTargets.Count -eq 6) 'The operations dashboard metric target count changed unexpectedly.'
+    foreach ($target in $metricTargets) {
+        Assert-True (
+            $target.subscription -eq '__SUBSCRIPTION_ID__'
+        ) 'An Azure Monitor metric target does not define the subscription at the target level.'
+        Assert-True (
+            $target.azureMonitor.metricDefinition -eq $target.azureMonitor.metricNamespace
+        ) 'An Azure Monitor metric target does not define its metric resource type.'
+        $resourceProperties = @($target.azureMonitor.resources[0].PSObject.Properties.Name)
+        Assert-True (
+            $resourceProperties.Count -eq 2 -and
+            $resourceProperties -contains 'resourceGroup' -and
+            $resourceProperties -contains 'resourceName'
+        ) 'An Azure Monitor metric resource contains fields that Grafana interprets as a malformed resource ID.'
+    }
     Assert-True (
         $dashboardText.Contains('ReconciliationResidual = sum(Residual) by TimeGenerated = bin(ChargePeriodStart, 1d)')
     ) 'The reconciliation residual query does not return a Grafana time axis.'

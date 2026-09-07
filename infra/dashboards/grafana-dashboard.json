@@ -1289,18 +1289,16 @@
             "azureMonitor": {
               "resources": [
                 {
-                  "subscription": "__SUBSCRIPTION_ID__",
                   "resourceGroup": "__RESOURCE_GROUP_NAME__",
-                  "resourceName": "__EVENT_HUB_NAMESPACE_NAME__",
-                  "metricNamespace": "Microsoft.EventHub/namespaces",
-                  "region": "__USAGE_LOCATION__"
+                  "resourceName": "__EVENT_HUB_NAMESPACE_NAME__"
                 }
               ],
               "metricNamespace": "Microsoft.EventHub/namespaces",
               "metricName": "IncomingMessages",
               "aggregation": "Total",
               "timeGrain": "PT1M",
-              "alias": "Events/min"
+              "alias": "Events/min",
+              "metricDefinition": "Microsoft.EventHub/namespaces"
             },
             "subscription": "__SUBSCRIPTION_ID__"
           }
@@ -1367,18 +1365,16 @@
             "azureMonitor": {
               "resources": [
                 {
-                  "subscription": "__SUBSCRIPTION_ID__",
                   "resourceGroup": "__RESOURCE_GROUP_NAME__",
-                  "resourceName": "__EVENT_HUB_NAMESPACE_NAME__",
-                  "metricNamespace": "Microsoft.EventHub/namespaces",
-                  "region": "__USAGE_LOCATION__"
+                  "resourceName": "__EVENT_HUB_NAMESPACE_NAME__"
                 }
               ],
               "metricNamespace": "Microsoft.EventHub/namespaces",
               "metricName": "CapturedMessages",
               "aggregation": "Total",
               "timeGrain": "PT1M",
-              "alias": "Captured messages"
+              "alias": "Captured messages",
+              "metricDefinition": "Microsoft.EventHub/namespaces"
             },
             "subscription": "__SUBSCRIPTION_ID__"
           }
@@ -1863,18 +1859,16 @@
             "azureMonitor": {
               "resources": [
                 {
-                  "subscription": "__SUBSCRIPTION_ID__",
                   "resourceGroup": "__RESOURCE_GROUP_NAME__",
-                  "resourceName": "__EVENT_HUB_NAMESPACE_NAME__",
-                  "metricNamespace": "Microsoft.EventHub/namespaces",
-                  "region": "__USAGE_LOCATION__"
+                  "resourceName": "__EVENT_HUB_NAMESPACE_NAME__"
                 }
               ],
               "metricNamespace": "Microsoft.EventHub/namespaces",
               "metricName": "CaptureBacklog",
               "aggregation": "Maximum",
               "timeGrain": "PT1M",
-              "alias": "Capture backlog"
+              "alias": "Capture backlog",
+              "metricDefinition": "Microsoft.EventHub/namespaces"
             },
             "subscription": "__SUBSCRIPTION_ID__"
           }
@@ -2005,18 +1999,16 @@
             "azureMonitor": {
               "resources": [
                 {
-                  "subscription": "__SUBSCRIPTION_ID__",
                   "resourceGroup": "__FINOPS_RESOURCE_GROUP_NAME__",
-                  "resourceName": "__FINOPS_DATA_FACTORY_NAME__",
-                  "metricNamespace": "Microsoft.DataFactory/factories",
-                  "region": "__USAGE_LOCATION__"
+                  "resourceName": "__FINOPS_DATA_FACTORY_NAME__"
                 }
               ],
               "metricNamespace": "Microsoft.DataFactory/factories",
               "metricName": "PipelineSucceededRuns",
               "aggregation": "Total",
               "timeGrain": "PT1M",
-              "alias": "Succeeded"
+              "alias": "Succeeded",
+              "metricDefinition": "Microsoft.DataFactory/factories"
             },
             "subscription": "__SUBSCRIPTION_ID__"
           },
@@ -2030,18 +2022,16 @@
             "azureMonitor": {
               "resources": [
                 {
-                  "subscription": "__SUBSCRIPTION_ID__",
                   "resourceGroup": "__FINOPS_RESOURCE_GROUP_NAME__",
-                  "resourceName": "__FINOPS_DATA_FACTORY_NAME__",
-                  "metricNamespace": "Microsoft.DataFactory/factories",
-                  "region": "__USAGE_LOCATION__"
+                  "resourceName": "__FINOPS_DATA_FACTORY_NAME__"
                 }
               ],
               "metricNamespace": "Microsoft.DataFactory/factories",
               "metricName": "PipelineFailedRuns",
               "aggregation": "Total",
               "timeGrain": "PT1M",
-              "alias": "Failed"
+              "alias": "Failed",
+              "metricDefinition": "Microsoft.DataFactory/factories"
             },
             "subscription": "__SUBSCRIPTION_ID__"
           },
@@ -2055,18 +2045,16 @@
             "azureMonitor": {
               "resources": [
                 {
-                  "subscription": "__SUBSCRIPTION_ID__",
                   "resourceGroup": "__FINOPS_RESOURCE_GROUP_NAME__",
-                  "resourceName": "__FINOPS_DATA_FACTORY_NAME__",
-                  "metricNamespace": "Microsoft.DataFactory/factories",
-                  "region": "__USAGE_LOCATION__"
+                  "resourceName": "__FINOPS_DATA_FACTORY_NAME__"
                 }
               ],
               "metricNamespace": "Microsoft.DataFactory/factories",
               "metricName": "PipelineCancelledRuns",
               "aggregation": "Total",
               "timeGrain": "PT1M",
-              "alias": "Cancelled"
+              "alias": "Cancelled",
+              "metricDefinition": "Microsoft.DataFactory/factories"
             },
             "subscription": "__SUBSCRIPTION_ID__"
           }
