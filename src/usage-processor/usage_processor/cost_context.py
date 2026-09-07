@@ -3,6 +3,7 @@ from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal
 import hashlib
 import json
+import time as time_module
 import uuid
 
 from . import ALLOCATION_VERSION
@@ -29,11 +30,13 @@ class ExternalCost:
 
 
 class SubscriptionCostQuery:
-    def __init__(self, subscription_id, credential):
+    def __init__(self, subscription_id, credential, max_attempts=3, sleep=None):
         from azure.mgmt.costmanagement import CostManagementClient
 
         self._client = CostManagementClient(credential=credential)
         self._scope = f"/subscriptions/{subscription_id}"
+        self._max_attempts = max_attempts
+        self._sleep = sleep or time_module.sleep
 
     def query_claude_ccu(self, start, end):
         from azure.mgmt.costmanagement.models import (
@@ -66,11 +69,40 @@ class SubscriptionCostQuery:
                 ],
             ),
         )
-        result = self._client.query.usage(
-            scope=self._scope,
-            parameters=definition,
+        for attempt in range(self._max_attempts):
+            try:
+                result = self._client.query.usage(
+                    scope=self._scope,
+                    parameters=definition,
+                )
+                return select_exact_claude_ccu(result)
+            except Exception as error:
+                if _http_status(error) != 429 or attempt + 1 == self._max_attempts:
+                    raise
+                self._sleep(_retry_after_seconds(error))
+
+
+def _http_status(error):
+    status = getattr(error, "status_code", None)
+    if status is not None:
+        return status
+    return getattr(getattr(error, "response", None), "status_code", None)
+
+
+def _retry_after_seconds(error):
+    response = getattr(error, "response", None)
+    headers = getattr(response, "headers", {}) or {}
+    value = (
+        headers.get("Retry-After")
+        or headers.get("retry-after")
+        or headers.get(
+            "x-ms-ratelimit-microsoft.costmanagement-entity-retry-after"
         )
-        return select_exact_claude_ccu(result)
+    )
+    try:
+        return min(60.0, max(0.0, float(value)))
+    except (TypeError, ValueError):
+        return 5.0
 
 
 def select_exact_claude_ccu(result):

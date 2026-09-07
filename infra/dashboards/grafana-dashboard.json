@@ -211,7 +211,7 @@
         "id": 3,
         "type": "stat",
         "title": "Requests",
-        "description": "Distinct scoped usage events. A stale or missing usage source returns no value.",
+        "description": "Distinct scoped usage events inside the selected dashboard period.",
         "gridPos": {
           "h": 5,
           "w": 3,
@@ -234,7 +234,7 @@
               "resources": [
                 "__WORKSPACE_RESOURCE_ID__"
               ],
-              "query": "let UsageLastSeen = toscalar(AIRequestUsage_CL\n| where ResourceGroupId =~ \"__RESOURCE_GROUP_ID__\" and ModelResourceId =~ \"__FOUNDRY_RESOURCE_ID__\"\n| summarize max(TimeGenerated));\nAIRequestUsage_CL\n| where $__timeFilter(TimeGenerated)\n| where ResourceGroupId =~ \"__RESOURCE_GROUP_ID__\" and ModelResourceId =~ \"__FOUNDRY_RESOURCE_ID__\"\n| extend Model = iff(isempty(ResponseModel), RequestModel, ResponseModel)\n| where \"$Team\" == \"All\" or TeamId == \"$Team\"\n| where \"$Subject\" == \"All\" or SubjectId == \"$Subject\"\n| where \"$Provider\" == \"All\" or Provider == \"$Provider\"\n| where \"$Model\" == \"All\" or Model == \"$Model\"\n| where \"$Project\" == \"All\" or ProjectId == \"$Project\"\n| summarize Value = count()\n| project Requests = iff(isnull(UsageLastSeen) or UsageLastSeen < ago(30m), long(null), Value)",
+              "query": "AIRequestUsage_CL\n| where $__timeFilter(TimeGenerated)\n| where ResourceGroupId =~ \"__RESOURCE_GROUP_ID__\" and ModelResourceId =~ \"__FOUNDRY_RESOURCE_ID__\"\n| extend Model = iff(isempty(ResponseModel), RequestModel, ResponseModel)\n| where \"$Team\" == \"All\" or TeamId == \"$Team\"\n| where \"$Subject\" == \"All\" or SubjectId == \"$Subject\"\n| where \"$Provider\" == \"All\" or Provider == \"$Provider\"\n| where \"$Model\" == \"All\" or Model == \"$Model\"\n| where \"$Project\" == \"All\" or ProjectId == \"$Project\"\n| summarize Value = count()\n| project Requests = Value",
               "resultFormat": "table"
             }
           }
@@ -264,7 +264,7 @@
         "id": 4,
         "type": "stat",
         "title": "Total tokens",
-        "description": "Provider-reported workload tokens. A stale or missing usage source returns no value.",
+        "description": "Provider-reported workload tokens inside the selected dashboard period.",
         "gridPos": {
           "h": 5,
           "w": 3,
@@ -287,7 +287,7 @@
               "resources": [
                 "__WORKSPACE_RESOURCE_ID__"
               ],
-              "query": "let UsageLastSeen = toscalar(AIRequestUsage_CL\n| where ResourceGroupId =~ \"__RESOURCE_GROUP_ID__\" and ModelResourceId =~ \"__FOUNDRY_RESOURCE_ID__\"\n| summarize max(TimeGenerated));\nAIRequestUsage_CL\n| where $__timeFilter(TimeGenerated)\n| where ResourceGroupId =~ \"__RESOURCE_GROUP_ID__\" and ModelResourceId =~ \"__FOUNDRY_RESOURCE_ID__\"\n| extend Model = iff(isempty(ResponseModel), RequestModel, ResponseModel)\n| where \"$Team\" == \"All\" or TeamId == \"$Team\"\n| where \"$Subject\" == \"All\" or SubjectId == \"$Subject\"\n| where \"$Provider\" == \"All\" or Provider == \"$Provider\"\n| where \"$Model\" == \"All\" or Model == \"$Model\"\n| where \"$Project\" == \"All\" or ProjectId == \"$Project\"\n| summarize Value = sum(TotalTokens)\n| project TotalTokens = iff(isnull(UsageLastSeen) or UsageLastSeen < ago(30m), long(null), Value)",
+              "query": "AIRequestUsage_CL\n| where $__timeFilter(TimeGenerated)\n| where ResourceGroupId =~ \"__RESOURCE_GROUP_ID__\" and ModelResourceId =~ \"__FOUNDRY_RESOURCE_ID__\"\n| extend Model = iff(isempty(ResponseModel), RequestModel, ResponseModel)\n| where \"$Team\" == \"All\" or TeamId == \"$Team\"\n| where \"$Subject\" == \"All\" or SubjectId == \"$Subject\"\n| where \"$Provider\" == \"All\" or Provider == \"$Provider\"\n| where \"$Model\" == \"All\" or Model == \"$Model\"\n| where \"$Project\" == \"All\" or ProjectId == \"$Project\"\n| summarize Value = sum(TotalTokens)\n| project TotalTokens = Value",
               "resultFormat": "table"
             }
           }
@@ -340,7 +340,7 @@
               "resources": [
                 "__WORKSPACE_RESOURCE_ID__"
               ],
-              "query": "let UsageLastSeen = toscalar(AIRequestUsage_CL\n| where ResourceGroupId =~ \"__RESOURCE_GROUP_ID__\" and ModelResourceId =~ \"__FOUNDRY_RESOURCE_ID__\"\n| summarize max(TimeGenerated));\nAIRequestUsage_CL\n| where $__timeFilter(TimeGenerated)\n| where ResourceGroupId =~ \"__RESOURCE_GROUP_ID__\" and ModelResourceId =~ \"__FOUNDRY_RESOURCE_ID__\"\n| extend Model = iff(isempty(ResponseModel), RequestModel, ResponseModel)\n| where \"$CostAuthority\" in (\"All\", \"Rate-card estimate\")\n| where \"$Team\" == \"All\" or TeamId == \"$Team\"\n| where \"$Subject\" == \"All\" or SubjectId == \"$Subject\"\n| where \"$Provider\" == \"All\" or Provider == \"$Provider\"\n| where \"$Model\" == \"All\" or Model == \"$Model\"\n| where \"$Project\" == \"All\" or ProjectId == \"$Project\"\n| summarize RatedRows = countif(isnotnull(EstimatedCost)), Estimate = sum(EstimatedCost)\n| project RateCardEstimate = iff(isnull(UsageLastSeen) or UsageLastSeen < ago(30m) or RatedRows == 0, real(null), Estimate)",
+              "query": "AIRequestUsage_CL\n| where $__timeFilter(TimeGenerated)\n| where ResourceGroupId =~ \"__RESOURCE_GROUP_ID__\" and ModelResourceId =~ \"__FOUNDRY_RESOURCE_ID__\"\n| extend Model = iff(isempty(ResponseModel), RequestModel, ResponseModel)\n| where \"$CostAuthority\" in (\"All\", \"Rate-card estimate\")\n| where \"$Team\" == \"All\" or TeamId == \"$Team\"\n| where \"$Subject\" == \"All\" or SubjectId == \"$Subject\"\n| where \"$Provider\" == \"All\" or Provider == \"$Provider\"\n| where \"$Model\" == \"All\" or Model == \"$Model\"\n| where \"$Project\" == \"All\" or ProjectId == \"$Project\"\n| summarize RatedRows = countif(isnotnull(EstimatedCost)), Estimate = sum(EstimatedCost)\n| project RateCardEstimate = iff(RatedRows == 0, real(null), Estimate)",
               "resultFormat": "table"
             }
           }
@@ -393,7 +393,7 @@
               "resources": [
                 "__WORKSPACE_RESOURCE_ID__"
               ],
-              "query": "let AllocationRows = materialize(AICostAllocation_CL\n| where RecordType == \"allocation\"\n| summarize arg_max(TimeGenerated, *) by RunId, RecordId);\nlet CompleteRuns = AICostAllocation_CL\n| where RecordType == \"run-complete\"\n| summarize arg_max(TimeGenerated, *) by RunId\n| join kind=inner (AllocationRows | summarize ActualRecordCount = count() by RunId) on RunId\n| where ActualRecordCount == ExpectedRecordCount;\nlet LatestRuns = CompleteRuns\n| summarize arg_max(TimeGenerated, *) by SourceType, SourceScope, SourcePath\n| project RunId, CompletionTime = TimeGenerated, SourceType, SourceScope, SourcePath;\nlet ScopedRows = LatestRuns\n| join kind=inner (AllocationRows) on RunId\n| where SourceScope =~ \"__RESOURCE_GROUP_ID__\" and IncludedInWorkloadTotal == true;\nlet AllocationLastSeen = toscalar(LatestRuns | where SourceType == \"finops-hub-focus-v1.2-preview\" and SourceScope =~ \"__RESOURCE_GROUP_ID__\" | summarize max(CompletionTime));\nScopedRows\n| where $__timeFilter(ChargePeriodStart)\n| where \"$CostAuthority\" in (\"All\", \"Allocated effective cost\")\n| where \"$Model\" == \"All\" and \"$Project\" == \"All\"\n| where \"$Team\" == \"All\" or TeamId == \"$Team\"\n| where \"$Subject\" == \"All\" or SubjectId == \"$Subject\"\n| where \"$Provider\" == \"All\" or Provider == \"$Provider\"\n| summarize Value = sum(AllocatedEffectiveCost)\n| project AllocatedEffectiveCost = iff(isnull(AllocationLastSeen) or AllocationLastSeen < ago(36h) or \"$CostAuthority\" !in (\"All\", \"Allocated effective cost\") or \"$Model\" != \"All\" or \"$Project\" != \"All\", real(null), Value)",
+              "query": "let AllocationRows = materialize(AICostAllocation_CL\n| where RecordType == \"allocation\"\n| summarize arg_max(TimeGenerated, *) by RunId, RecordId);\nlet CompleteRuns = AICostAllocation_CL\n| where RecordType == \"run-complete\"\n| summarize arg_max(TimeGenerated, *) by RunId\n| join kind=inner (AllocationRows | summarize ActualRecordCount = count() by RunId) on RunId\n| where ActualRecordCount == ExpectedRecordCount;\nlet LatestRuns = CompleteRuns\n| summarize arg_max(TimeGenerated, *) by SourceType, SourceScope, SourcePath\n| project RunId, CompletionTime = TimeGenerated, SourceType, SourceScope, SourcePath;\nlet ScopedRows = LatestRuns\n| join kind=inner (AllocationRows) on RunId\n| where SourceScope =~ \"__RESOURCE_GROUP_ID__\" and IncludedInWorkloadTotal == true;\nScopedRows\n| where $__timeFilter(ChargePeriodStart)\n| where \"$CostAuthority\" in (\"All\", \"Allocated effective cost\")\n| where \"$Model\" == \"All\" and \"$Project\" == \"All\"\n| where \"$Team\" == \"All\" or TeamId == \"$Team\"\n| where \"$Subject\" == \"All\" or SubjectId == \"$Subject\"\n| where \"$Provider\" == \"All\" or Provider == \"$Provider\"\n| summarize Value = sum(AllocatedEffectiveCost)\n| project AllocatedEffectiveCost = iff(\"$CostAuthority\" !in (\"All\", \"Allocated effective cost\") or \"$Model\" != \"All\" or \"$Project\" != \"All\", real(null), Value)",
               "resultFormat": "table"
             }
           }
@@ -446,7 +446,7 @@
               "resources": [
                 "__WORKSPACE_RESOURCE_ID__"
               ],
-              "query": "let AllocationRows = materialize(AICostAllocation_CL\n| where RecordType == \"allocation\"\n| summarize arg_max(TimeGenerated, *) by RunId, RecordId);\nlet CompleteRuns = AICostAllocation_CL\n| where RecordType == \"run-complete\"\n| summarize arg_max(TimeGenerated, *) by RunId\n| join kind=inner (AllocationRows | summarize ActualRecordCount = count() by RunId) on RunId\n| where ActualRecordCount == ExpectedRecordCount;\nlet LatestRuns = CompleteRuns\n| summarize arg_max(TimeGenerated, *) by SourceType, SourceScope, SourcePath\n| project RunId, CompletionTime = TimeGenerated, SourceType, SourceScope, SourcePath;\nlet ScopedRows = LatestRuns\n| join kind=inner (AllocationRows) on RunId\n| where SourceScope =~ \"__RESOURCE_GROUP_ID__\" and IncludedInWorkloadTotal == true;\nlet AllocationLastSeen = toscalar(LatestRuns | where SourceType == \"finops-hub-focus-v1.2-preview\" and SourceScope =~ \"__RESOURCE_GROUP_ID__\" | summarize max(CompletionTime));\nScopedRows\n| where $__timeFilter(ChargePeriodStart)\n| where \"$CostAuthority\" in (\"All\", \"Allocated billed cost\")\n| where \"$Model\" == \"All\" and \"$Project\" == \"All\"\n| where \"$Team\" == \"All\" or TeamId == \"$Team\"\n| where \"$Subject\" == \"All\" or SubjectId == \"$Subject\"\n| where \"$Provider\" == \"All\" or Provider == \"$Provider\"\n| summarize Value = sum(AllocatedBilledCost)\n| project AllocatedBilledCost = iff(isnull(AllocationLastSeen) or AllocationLastSeen < ago(36h) or \"$CostAuthority\" !in (\"All\", \"Allocated billed cost\") or \"$Model\" != \"All\" or \"$Project\" != \"All\", real(null), Value)",
+              "query": "let AllocationRows = materialize(AICostAllocation_CL\n| where RecordType == \"allocation\"\n| summarize arg_max(TimeGenerated, *) by RunId, RecordId);\nlet CompleteRuns = AICostAllocation_CL\n| where RecordType == \"run-complete\"\n| summarize arg_max(TimeGenerated, *) by RunId\n| join kind=inner (AllocationRows | summarize ActualRecordCount = count() by RunId) on RunId\n| where ActualRecordCount == ExpectedRecordCount;\nlet LatestRuns = CompleteRuns\n| summarize arg_max(TimeGenerated, *) by SourceType, SourceScope, SourcePath\n| project RunId, CompletionTime = TimeGenerated, SourceType, SourceScope, SourcePath;\nlet ScopedRows = LatestRuns\n| join kind=inner (AllocationRows) on RunId\n| where SourceScope =~ \"__RESOURCE_GROUP_ID__\" and IncludedInWorkloadTotal == true;\nScopedRows\n| where $__timeFilter(ChargePeriodStart)\n| where \"$CostAuthority\" in (\"All\", \"Allocated billed cost\")\n| where \"$Model\" == \"All\" and \"$Project\" == \"All\"\n| where \"$Team\" == \"All\" or TeamId == \"$Team\"\n| where \"$Subject\" == \"All\" or SubjectId == \"$Subject\"\n| where \"$Provider\" == \"All\" or Provider == \"$Provider\"\n| summarize Value = sum(AllocatedBilledCost)\n| project AllocatedBilledCost = iff(\"$CostAuthority\" !in (\"All\", \"Allocated billed cost\") or \"$Model\" != \"All\" or \"$Project\" != \"All\", real(null), Value)",
               "resultFormat": "table"
             }
           }
@@ -499,7 +499,7 @@
               "resources": [
                 "__WORKSPACE_RESOURCE_ID__"
               ],
-              "query": "let AllocationRows = materialize(AICostAllocation_CL\n| where RecordType == \"allocation\"\n| summarize arg_max(TimeGenerated, *) by RunId, RecordId);\nlet CompleteRuns = AICostAllocation_CL\n| where RecordType == \"run-complete\"\n| summarize arg_max(TimeGenerated, *) by RunId\n| join kind=inner (AllocationRows | summarize ActualRecordCount = count() by RunId) on RunId\n| where ActualRecordCount == ExpectedRecordCount;\nlet LatestRuns = CompleteRuns\n| summarize arg_max(TimeGenerated, *) by SourceType, SourceScope, SourcePath\n| project RunId, CompletionTime = TimeGenerated, SourceType, SourceScope, SourcePath;\nlet ScopedRows = LatestRuns\n| join kind=inner (AllocationRows) on RunId\n| where SourceScope =~ \"__RESOURCE_GROUP_ID__\" and IncludedInWorkloadTotal == true;\nlet AllocationLastSeen = toscalar(LatestRuns | where SourceType == \"finops-hub-focus-v1.2-preview\" and SourceScope =~ \"__RESOURCE_GROUP_ID__\" | summarize max(CompletionTime));\nScopedRows\n| where $__timeFilter(ChargePeriodStart)\n| where \"$Team\" == \"All\" and \"$Subject\" == \"All\" and \"$Model\" == \"All\" and \"$Project\" == \"All\"\n| where \"$Provider\" == \"All\" or Provider == \"$Provider\"\n| extend SourceAuthority = coalesce(SourceEffectiveCost, SourceBilledCost), UnallocatedAuthority = coalesce(UnallocatedEffectiveCost, UnallocatedBilledCost)\n| summarize SourceCost = any(SourceAuthority), UnallocatedCost = sum(UnallocatedAuthority) by RunId, SourcePath, ChargePeriodStart, ChargePeriodEnd, Provider, MeterId, MeterName, ResourceId\n| summarize SourceCost = sum(SourceCost), UnallocatedCost = sum(UnallocatedCost)\n| project UnallocatedCost = iff(isnull(AllocationLastSeen) or AllocationLastSeen < ago(36h) or \"$CostAuthority\" !in (\"All\", \"Allocated effective cost\") or \"$Team\" != \"All\" or \"$Subject\" != \"All\" or \"$Model\" != \"All\" or \"$Project\" != \"All\", real(null), UnallocatedCost), UnallocatedPercent = iff(isnull(AllocationLastSeen) or AllocationLastSeen < ago(36h) or \"$CostAuthority\" !in (\"All\", \"Allocated effective cost\") or \"$Team\" != \"All\" or \"$Subject\" != \"All\" or \"$Model\" != \"All\" or \"$Project\" != \"All\" or SourceCost == 0, real(null), 100.0 * UnallocatedCost / SourceCost)",
+              "query": "let AllocationRows = materialize(AICostAllocation_CL\n| where RecordType == \"allocation\"\n| summarize arg_max(TimeGenerated, *) by RunId, RecordId);\nlet CompleteRuns = AICostAllocation_CL\n| where RecordType == \"run-complete\"\n| summarize arg_max(TimeGenerated, *) by RunId\n| join kind=inner (AllocationRows | summarize ActualRecordCount = count() by RunId) on RunId\n| where ActualRecordCount == ExpectedRecordCount;\nlet LatestRuns = CompleteRuns\n| summarize arg_max(TimeGenerated, *) by SourceType, SourceScope, SourcePath\n| project RunId, CompletionTime = TimeGenerated, SourceType, SourceScope, SourcePath;\nlet ScopedRows = LatestRuns\n| join kind=inner (AllocationRows) on RunId\n| where SourceScope =~ \"__RESOURCE_GROUP_ID__\" and IncludedInWorkloadTotal == true;\nScopedRows\n| where $__timeFilter(ChargePeriodStart)\n| where \"$Team\" == \"All\" and \"$Subject\" == \"All\" and \"$Model\" == \"All\" and \"$Project\" == \"All\"\n| where \"$Provider\" == \"All\" or Provider == \"$Provider\"\n| extend SourceAuthority = coalesce(SourceEffectiveCost, SourceBilledCost), UnallocatedAuthority = coalesce(UnallocatedEffectiveCost, UnallocatedBilledCost)\n| summarize SourceCost = any(SourceAuthority), UnallocatedCost = sum(UnallocatedAuthority) by RunId, SourcePath, ChargePeriodStart, ChargePeriodEnd, Provider, MeterId, MeterName, ResourceId\n| summarize SourceCost = sum(SourceCost), UnallocatedCost = sum(UnallocatedCost)\n| project UnallocatedCost = iff(\"$CostAuthority\" !in (\"All\", \"Allocated effective cost\") or \"$Team\" != \"All\" or \"$Subject\" != \"All\" or \"$Model\" != \"All\" or \"$Project\" != \"All\", real(null), UnallocatedCost), UnallocatedPercent = iff(\"$CostAuthority\" !in (\"All\", \"Allocated effective cost\") or \"$Team\" != \"All\" or \"$Subject\" != \"All\" or \"$Model\" != \"All\" or \"$Project\" != \"All\" or SourceCost == 0, real(null), 100.0 * UnallocatedCost / SourceCost)",
               "resultFormat": "table"
             }
           }
@@ -553,7 +553,7 @@
         "id": 9,
         "type": "stat",
         "title": "Reconciliation factor",
-        "description": "Allocated plus unallocated divided by the authoritative source cost. All identity and model filters must be All.",
+        "description": "Allocated plus unallocated divided by source cost. A value of 1 proves cost reconciliation, not successful attribution.",
         "gridPos": {
           "h": 5,
           "w": 3,
@@ -576,7 +576,7 @@
               "resources": [
                 "__WORKSPACE_RESOURCE_ID__"
               ],
-              "query": "let AllocationRows = materialize(AICostAllocation_CL\n| where RecordType == \"allocation\"\n| summarize arg_max(TimeGenerated, *) by RunId, RecordId);\nlet CompleteRuns = AICostAllocation_CL\n| where RecordType == \"run-complete\"\n| summarize arg_max(TimeGenerated, *) by RunId\n| join kind=inner (AllocationRows | summarize ActualRecordCount = count() by RunId) on RunId\n| where ActualRecordCount == ExpectedRecordCount;\nlet LatestRuns = CompleteRuns\n| summarize arg_max(TimeGenerated, *) by SourceType, SourceScope, SourcePath\n| project RunId, CompletionTime = TimeGenerated, SourceType, SourceScope, SourcePath;\nlet ScopedRows = LatestRuns\n| join kind=inner (AllocationRows) on RunId\n| where SourceScope =~ \"__RESOURCE_GROUP_ID__\" and IncludedInWorkloadTotal == true;\nlet AllocationLastSeen = toscalar(LatestRuns | where SourceType == \"finops-hub-focus-v1.2-preview\" and SourceScope =~ \"__RESOURCE_GROUP_ID__\" | summarize max(CompletionTime));\nScopedRows\n| where $__timeFilter(ChargePeriodStart)\n| where \"$Team\" == \"All\" and \"$Subject\" == \"All\" and \"$Model\" == \"All\" and \"$Project\" == \"All\"\n| where \"$Provider\" == \"All\" or Provider == \"$Provider\"\n| extend SourceAuthority = coalesce(SourceEffectiveCost, SourceBilledCost), AllocatedAuthority = coalesce(AllocatedEffectiveCost, AllocatedBilledCost), UnallocatedAuthority = coalesce(UnallocatedEffectiveCost, UnallocatedBilledCost)\n| summarize SourceCost = any(SourceAuthority), AllocatedCost = sum(AllocatedAuthority), UnallocatedCost = sum(UnallocatedAuthority) by RunId, SourcePath, ChargePeriodStart, ChargePeriodEnd, Provider, MeterId, MeterName, ResourceId\n| summarize SourceCost = sum(SourceCost), ReconciledCost = sum(AllocatedCost + UnallocatedCost)\n| project ReconciliationFactor = iff(isnull(AllocationLastSeen) or AllocationLastSeen < ago(36h) or \"$CostAuthority\" !in (\"All\", \"Allocated effective cost\") or SourceCost == 0, real(null), ReconciledCost / SourceCost)",
+              "query": "let AllocationRows = materialize(AICostAllocation_CL\n| where RecordType == \"allocation\"\n| summarize arg_max(TimeGenerated, *) by RunId, RecordId);\nlet CompleteRuns = AICostAllocation_CL\n| where RecordType == \"run-complete\"\n| summarize arg_max(TimeGenerated, *) by RunId\n| join kind=inner (AllocationRows | summarize ActualRecordCount = count() by RunId) on RunId\n| where ActualRecordCount == ExpectedRecordCount;\nlet LatestRuns = CompleteRuns\n| summarize arg_max(TimeGenerated, *) by SourceType, SourceScope, SourcePath\n| project RunId, CompletionTime = TimeGenerated, SourceType, SourceScope, SourcePath;\nlet ScopedRows = LatestRuns\n| join kind=inner (AllocationRows) on RunId\n| where SourceScope =~ \"__RESOURCE_GROUP_ID__\" and IncludedInWorkloadTotal == true;\nScopedRows\n| where $__timeFilter(ChargePeriodStart)\n| where \"$Team\" == \"All\" and \"$Subject\" == \"All\" and \"$Model\" == \"All\" and \"$Project\" == \"All\"\n| where \"$Provider\" == \"All\" or Provider == \"$Provider\"\n| extend SourceAuthority = coalesce(SourceEffectiveCost, SourceBilledCost), AllocatedAuthority = coalesce(AllocatedEffectiveCost, AllocatedBilledCost), UnallocatedAuthority = coalesce(UnallocatedEffectiveCost, UnallocatedBilledCost)\n| summarize SourceCost = any(SourceAuthority), AllocatedCost = sum(AllocatedAuthority), UnallocatedCost = sum(UnallocatedAuthority) by RunId, SourcePath, ChargePeriodStart, ChargePeriodEnd, Provider, MeterId, MeterName, ResourceId\n| summarize SourceCost = sum(SourceCost), ReconciledCost = sum(AllocatedCost + UnallocatedCost)\n| project ReconciliationFactor = iff(\"$CostAuthority\" !in (\"All\", \"Allocated effective cost\") or SourceCost == 0, real(null), ReconciledCost / SourceCost)",
               "resultFormat": "table"
             }
           }
@@ -606,7 +606,7 @@
         "id": 10,
         "type": "stat",
         "title": "Data status",
-        "description": "Fresh: usage is under 30 minutes old and allocation is under 36 hours old.",
+        "description": "Reports whether usage and verified allocation records exist inside the selected dashboard period.",
         "gridPos": {
           "h": 5,
           "w": 3,
@@ -629,7 +629,7 @@
               "resources": [
                 "__WORKSPACE_RESOURCE_ID__"
               ],
-              "query": "let UsageLastSeen = toscalar(AIRequestUsage_CL\n| where ResourceGroupId =~ \"__RESOURCE_GROUP_ID__\" and ModelResourceId =~ \"__FOUNDRY_RESOURCE_ID__\"\n| summarize max(TimeGenerated));\nlet AllocationRows = materialize(AICostAllocation_CL\n| where RecordType == \"allocation\"\n| summarize arg_max(TimeGenerated, *) by RunId, RecordId);\nlet AllocationLastSeen = toscalar(AICostAllocation_CL\n| where RecordType == \"run-complete\" and SourceType == \"finops-hub-focus-v1.2-preview\" and SourceScope =~ \"__RESOURCE_GROUP_ID__\"\n| summarize arg_max(TimeGenerated, *) by RunId\n| join kind=leftouter (AllocationRows | summarize ActualRecordCount = count() by RunId) on RunId\n| extend ActualRecordCount = coalesce(ActualRecordCount, 0)\n| where ActualRecordCount == ExpectedRecordCount\n| summarize max(TimeGenerated));\nprint DataStatus = case(isnull(UsageLastSeen), \"Usage unavailable\", UsageLastSeen < ago(30m), \"Usage stale\", isnull(AllocationLastSeen), \"Allocation unavailable\", AllocationLastSeen < ago(36h), \"Allocation stale\", \"Fresh\")",
+              "query": "let UsageRows = toscalar(AIRequestUsage_CL\n| where $__timeFilter(TimeGenerated)\n| where ResourceGroupId =~ \"__RESOURCE_GROUP_ID__\" and ModelResourceId =~ \"__FOUNDRY_RESOURCE_ID__\"\n| summarize count());\nlet AllocationRows = materialize(AICostAllocation_CL\n| where RecordType == \"allocation\"\n| summarize arg_max(TimeGenerated, *) by RunId, RecordId);\nlet CompleteRuns = AICostAllocation_CL\n| where RecordType == \"run-complete\" and SourceType == \"finops-hub-focus-v1.2-preview\" and SourceScope =~ \"__RESOURCE_GROUP_ID__\"\n| summarize arg_max(TimeGenerated, *) by RunId\n| join kind=inner (AllocationRows | summarize ActualRecordCount = count() by RunId) on RunId\n| where ActualRecordCount == ExpectedRecordCount;\nlet LatestRuns = CompleteRuns\n| summarize arg_max(TimeGenerated, *) by SourceType, SourceScope, SourcePath\n| project RunId;\nlet AllocationRowsInRange = toscalar(LatestRuns\n| join kind=inner (AllocationRows) on RunId\n| where IncludedInWorkloadTotal == true\n| where $__timeFilter(ChargePeriodStart)\n| summarize count());\nprint DataStatus = case(UsageRows == 0 and AllocationRowsInRange == 0, \"No usage or allocation in range\", UsageRows == 0, \"No usage in range\", AllocationRowsInRange == 0, \"No allocation in range\", \"Usage and allocation in range\")",
               "resultFormat": "table"
             }
           }
@@ -778,7 +778,7 @@
               "resources": [
                 "__WORKSPACE_RESOURCE_ID__"
               ],
-              "query": "let Totals = AIRequestUsage_CL\n| where $__timeFilter(TimeGenerated)\n| where ResourceGroupId =~ \"__RESOURCE_GROUP_ID__\" and ModelResourceId =~ \"__FOUNDRY_RESOURCE_ID__\"\n| extend Model = iff(isempty(ResponseModel), RequestModel, ResponseModel)\n| where \"$Team\" == \"All\" or TeamId == \"$Team\"\n| where \"$Subject\" == \"All\" or SubjectId == \"$Subject\"\n| where \"$Provider\" == \"All\" or Provider == \"$Provider\"\n| where \"$Model\" == \"All\" or Model == \"$Model\"\n| where \"$Project\" == \"All\" or ProjectId == \"$Project\"\n| summarize UncachedInput = sum(UncachedInputTokens), CachedInput = sum(CachedInputTokens), CacheWrite5m = sum(CacheWrite5mTokens), CacheWrite1h = sum(CacheWrite1hTokens), VisibleOutput = sum(VisibleOutputTokens), Reasoning = sum(ReasoningTokens) by Provider;\nunion\n(Totals | project Provider, TokenCategory = \"Uncached input\", Tokens = UncachedInput),\n(Totals | project Provider, TokenCategory = \"Cached input / cache read\", Tokens = CachedInput),\n(Totals | project Provider, TokenCategory = \"5m cache write\", Tokens = CacheWrite5m),\n(Totals | project Provider, TokenCategory = \"1h cache write\", Tokens = CacheWrite1h),\n(Totals | project Provider, TokenCategory = \"Visible output\", Tokens = VisibleOutput),\n(Totals | project Provider, TokenCategory = \"Reasoning / thinking\", Tokens = Reasoning)\n| where Tokens > 0\n| order by Provider asc, TokenCategory asc",
+              "query": "let Totals = AIRequestUsage_CL\n| where $__timeFilter(TimeGenerated)\n| where ResourceGroupId =~ \"__RESOURCE_GROUP_ID__\" and ModelResourceId =~ \"__FOUNDRY_RESOURCE_ID__\"\n| extend Model = iff(isempty(ResponseModel), RequestModel, ResponseModel)\n| where \"$Team\" == \"All\" or TeamId == \"$Team\"\n| where \"$Subject\" == \"All\" or SubjectId == \"$Subject\"\n| where \"$Provider\" == \"All\" or Provider == \"$Provider\"\n| where \"$Model\" == \"All\" or Model == \"$Model\"\n| where \"$Project\" == \"All\" or ProjectId == \"$Project\"\n| summarize UncachedInput = sum(UncachedInputTokens), CachedInput = sum(CachedInputTokens), CacheWrite5m = sum(CacheWrite5mTokens), CacheWrite1h = sum(CacheWrite1hTokens), VisibleOutput = sum(VisibleOutputTokens), Reasoning = sum(ReasoningTokens) by Provider;\nunion\n(Totals | project Category = strcat(Provider, \" / Uncached input\"), Tokens = UncachedInput),\n(Totals | project Category = strcat(Provider, \" / Cached input / cache read\"), Tokens = CachedInput),\n(Totals | project Category = strcat(Provider, \" / 5m cache write\"), Tokens = CacheWrite5m),\n(Totals | project Category = strcat(Provider, \" / 1h cache write\"), Tokens = CacheWrite1h),\n(Totals | project Category = strcat(Provider, \" / Visible output\"), Tokens = VisibleOutput),\n(Totals | project Category = strcat(Provider, \" / Reasoning / thinking\"), Tokens = Reasoning)\n| where Tokens > 0\n| order by Category asc",
               "resultFormat": "table"
             }
           }
@@ -1300,17 +1300,9 @@
               "metricName": "IncomingMessages",
               "aggregation": "Total",
               "timeGrain": "PT1M",
-              "dimensionFilters": [
-                {
-                  "dimension": "EntityName",
-                  "operator": "eq",
-                  "filters": [
-                    "ai-usage"
-                  ]
-                }
-              ],
               "alias": "Events/min"
-            }
+            },
+            "subscription": "__SUBSCRIPTION_ID__"
           }
         ],
         "options": {
@@ -1386,17 +1378,9 @@
               "metricName": "CapturedMessages",
               "aggregation": "Total",
               "timeGrain": "PT1M",
-              "dimensionFilters": [
-                {
-                  "dimension": "EntityName",
-                  "operator": "eq",
-                  "filters": [
-                    "ai-usage"
-                  ]
-                }
-              ],
               "alias": "Captured messages"
-            }
+            },
+            "subscription": "__SUBSCRIPTION_ID__"
           }
         ],
         "options": {
@@ -1807,7 +1791,7 @@
         "id": 12,
         "type": "timeseries",
         "title": "Function failures and retry indicators",
-        "description": "Retries are limited to observable past-due and ambiguous-ingestion warnings. The ingestion retry helper does not emit attempt telemetry.",
+        "description": "Shows application exceptions and observable retry warnings. Excludes normal Python worker termination with exit code 143.",
         "gridPos": {
           "h": 8,
           "w": 12,
@@ -1830,7 +1814,7 @@
               "resources": [
                 "__WORKSPACE_RESOURCE_ID__"
               ],
-              "query": "let Failures = AppExceptions\n| where $__timeFilter(TimeGenerated)\n| where AppRoleName == \"__FUNCTION_APP_NAME__\"\n| project TimeGenerated, Function = iff(isempty(OperationName), \"unknown\", OperationName), Signal = \"Failure\", Severity = \"Error\";\nlet RetryIndicators = AppTraces\n| where $__timeFilter(TimeGenerated)\n| where AppRoleName == \"__FUNCTION_APP_NAME__\"\n| where Message has \"past due\" or Message has \"Skipped ambiguously ingested\"\n| project TimeGenerated, Function = iff(isempty(OperationName), \"processor\", OperationName), Signal = \"Retry indicator\", Severity = \"Warning\";\nunion Failures, RetryIndicators\n| where \"$Component\" in (\"All\", \"Processor\")\n| where \"$Severity\" == \"All\" or Severity == \"$Severity\"\n| summarize Events = count() by bin(TimeGenerated, $__interval), Function, Signal\n| extend Series = strcat(Function, \" / \", Signal)\n| project TimeGenerated, Events, Series\n| order by TimeGenerated asc",
+              "query": "let Failures = AppExceptions\n| where $__timeFilter(TimeGenerated)\n| where AppRoleName == \"__FUNCTION_APP_NAME__\"\n| where not(ProblemId has \"WorkerProcess.ThrowIfExitError\" and OuterMessage has \"exited with code 143\")\n| project TimeGenerated, Function = iff(isempty(OperationName), \"unknown\", OperationName), Signal = \"Failure\", Severity = \"Error\";\nlet RetryIndicators = AppTraces\n| where $__timeFilter(TimeGenerated)\n| where AppRoleName == \"__FUNCTION_APP_NAME__\"\n| where Message has \"past due\" or Message has \"Skipped ambiguously ingested\"\n| project TimeGenerated, Function = iff(isempty(OperationName), \"processor\", OperationName), Signal = \"Retry indicator\", Severity = \"Warning\";\nunion Failures, RetryIndicators\n| where \"$Component\" in (\"All\", \"Processor\")\n| where \"$Severity\" == \"All\" or Severity == \"$Severity\"\n| summarize Events = count() by bin(TimeGenerated, $__interval), Function, Signal\n| extend Series = strcat(Function, \" / \", Signal)\n| project TimeGenerated, Events, Series\n| order by TimeGenerated asc",
               "resultFormat": "time_series"
             }
           }
@@ -1890,17 +1874,9 @@
               "metricName": "CaptureBacklog",
               "aggregation": "Maximum",
               "timeGrain": "PT1M",
-              "dimensionFilters": [
-                {
-                  "dimension": "EntityName",
-                  "operator": "eq",
-                  "filters": [
-                    "ai-usage"
-                  ]
-                }
-              ],
               "alias": "Capture backlog"
-            }
+            },
+            "subscription": "__SUBSCRIPTION_ID__"
           }
         ],
         "options": {
@@ -2041,7 +2017,8 @@
               "aggregation": "Total",
               "timeGrain": "PT1M",
               "alias": "Succeeded"
-            }
+            },
+            "subscription": "__SUBSCRIPTION_ID__"
           },
           {
             "refId": "B",
@@ -2065,7 +2042,8 @@
               "aggregation": "Total",
               "timeGrain": "PT1M",
               "alias": "Failed"
-            }
+            },
+            "subscription": "__SUBSCRIPTION_ID__"
           },
           {
             "refId": "C",
@@ -2089,7 +2067,8 @@
               "aggregation": "Total",
               "timeGrain": "PT1M",
               "alias": "Cancelled"
-            }
+            },
+            "subscription": "__SUBSCRIPTION_ID__"
           }
         ],
         "options": {
@@ -2260,7 +2239,7 @@
       },
       {
         "id": 21,
-        "type": "barchart",
+        "type": "timeseries",
         "title": "Reconciliation residual by charge day",
         "description": "Residual equals source authority minus allocated and unallocated authority for the latest run per source path.",
         "gridPos": {
@@ -2285,7 +2264,7 @@
               "resources": [
                 "__WORKSPACE_RESOURCE_ID__"
               ],
-              "query": "let AllocationRows = materialize(AICostAllocation_CL\n| where RecordType == \"allocation\"\n| summarize arg_max(TimeGenerated, *) by RunId, RecordId);\nlet CompleteRuns = AICostAllocation_CL\n| where RecordType == \"run-complete\"\n| summarize arg_max(TimeGenerated, *) by RunId\n| join kind=leftouter (AllocationRows | summarize ActualRecordCount = count() by RunId) on RunId\n| extend ActualRecordCount = coalesce(ActualRecordCount, 0)\n| where ActualRecordCount == ExpectedRecordCount;\nlet LatestRuns = CompleteRuns\n| summarize arg_max(TimeGenerated, *) by SourceType, SourceScope, SourcePath\n| project RunId;\nLatestRuns\n| join kind=inner (AllocationRows) on RunId\n| where SourceScope =~ \"__RESOURCE_GROUP_ID__\" and IncludedInWorkloadTotal == true\n| where $__timeFilter(ChargePeriodStart)\n| where \"$Component\" in (\"All\", \"FOCUS\")\n| extend SourceAuthority = coalesce(SourceEffectiveCost, SourceBilledCost), AllocatedAuthority = coalesce(AllocatedEffectiveCost, AllocatedBilledCost), UnallocatedAuthority = coalesce(UnallocatedEffectiveCost, UnallocatedBilledCost)\n| summarize SourceCost = any(SourceAuthority), AllocatedCost = sum(AllocatedAuthority), UnallocatedCost = sum(UnallocatedAuthority) by RunId, SourcePath, ChargePeriodStart, ChargePeriodEnd, Provider, MeterId, MeterName, ResourceId\n| extend Residual = SourceCost - AllocatedCost - UnallocatedCost\n| summarize ReconciliationResidual = sum(Residual) by ChargeDay = bin(ChargePeriodStart, 1d)\n| order by ChargeDay asc",
+              "query": "let AllocationRows = materialize(AICostAllocation_CL\n| where RecordType == \"allocation\"\n| summarize arg_max(TimeGenerated, *) by RunId, RecordId);\nlet CompleteRuns = AICostAllocation_CL\n| where RecordType == \"run-complete\"\n| summarize arg_max(TimeGenerated, *) by RunId\n| join kind=leftouter (AllocationRows | summarize ActualRecordCount = count() by RunId) on RunId\n| extend ActualRecordCount = coalesce(ActualRecordCount, 0)\n| where ActualRecordCount == ExpectedRecordCount;\nlet LatestRuns = CompleteRuns\n| summarize arg_max(TimeGenerated, *) by SourceType, SourceScope, SourcePath\n| project RunId;\nLatestRuns\n| join kind=inner (AllocationRows) on RunId\n| where SourceScope =~ \"__RESOURCE_GROUP_ID__\" and IncludedInWorkloadTotal == true\n| where $__timeFilter(ChargePeriodStart)\n| where \"$Component\" in (\"All\", \"FOCUS\")\n| extend SourceAuthority = coalesce(SourceEffectiveCost, SourceBilledCost), AllocatedAuthority = coalesce(AllocatedEffectiveCost, AllocatedBilledCost), UnallocatedAuthority = coalesce(UnallocatedEffectiveCost, UnallocatedBilledCost)\n| summarize SourceCost = any(SourceAuthority), AllocatedCost = sum(AllocatedAuthority), UnallocatedCost = sum(UnallocatedAuthority) by RunId, SourcePath, ChargePeriodStart, ChargePeriodEnd, Provider, MeterId, MeterName, ResourceId\n| extend Residual = SourceCost - AllocatedCost - UnallocatedCost\n| summarize ReconciliationResidual = sum(Residual) by TimeGenerated = bin(ChargePeriodStart, 1d)\n| order by TimeGenerated asc",
               "resultFormat": "table"
             }
           }

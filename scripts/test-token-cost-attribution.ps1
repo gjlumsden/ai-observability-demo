@@ -217,6 +217,24 @@ function Test-DashboardContracts {
         $dashboardText.Contains('sequenceLag') -and
         $dashboardText.Contains('LastEnqueuedSequenceNumber < 0, long(null), EventAgeSeconds')
     ) 'The operations dashboard does not query valid checkpoint telemetry.'
+    Assert-True (
+        -not $dashboardText.Contains('UsageLastSeen < ago(30m)') -and
+        -not $dashboardText.Contains('AllocationLastSeen < ago(36h)')
+    ) 'A business summary overrides the selected dashboard period with a fixed freshness gate.'
+    Assert-True (
+        $dashboardText.Contains('Category = strcat(Provider, \" / Uncached input\")') -and
+        $dashboardText.Contains('| order by Category asc')
+    ) 'The provider token chart does not produce unique provider and token-category labels.'
+    Assert-True (
+        $dashboardText.Contains('ProblemId has \"WorkerProcess.ThrowIfExitError\"') -and
+        $dashboardText.Contains('OuterMessage has \"exited with code 143\"')
+    ) 'The function failure query does not exclude normal worker recycling.'
+    Assert-True (
+        -not $dashboardText.Contains('\"dimensionFilters\"')
+    ) 'A dashboard metric target filters on a dimension unavailable in its Azure metric definition.'
+    Assert-True (
+        $dashboardText.Contains('ReconciliationResidual = sum(Residual) by TimeGenerated = bin(ChargePeriodStart, 1d)')
+    ) 'The reconciliation residual query does not return a Grafana time axis.'
 
     $dashboardModulePath = Join-Path $repositoryRoot 'infra\modules\grafana-dashboard.bicep'
     $dashboardModule = Get-Content -LiteralPath $dashboardModulePath -Raw
