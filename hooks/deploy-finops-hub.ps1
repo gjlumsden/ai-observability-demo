@@ -303,6 +303,9 @@ try {
     if ([string]$managedOutputs.monitoredResourceGroupId.value -ine $mainResourceGroupId) {
         throw 'The FinOps hub returned a monitored scope that differs from the main resource group.'
     }
+    $configurationRunId = Invoke-FinOpsExportConfiguration -SubscriptionId $subscriptionId `
+        -ResourceGroupName $finOpsResourceGroupName -DataFactoryName ([string]$managedOutputs.dataFactoryName.value)
+    Set-AzdValue 'FINOPS_CONFIGURE_EXPORTS_RUN_ID' $configurationRunId
 
     $resourceGroupExportsJson = @()
     for ($attempt = 1; $attempt -le 12; $attempt++) {

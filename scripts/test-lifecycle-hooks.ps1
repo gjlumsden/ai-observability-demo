@@ -54,6 +54,10 @@ function Test-PreprovisionContracts {
         $preprovision.Contains("'Microsoft.DataFactory/factories/read'")
     ) 'The preprovision hook must require access to read an existing hub identity.'
     Assert-True (
+        $preprovision.Contains("'Microsoft.DataFactory/factories/pipelines/createrun/action'") -and
+        $preprovision.Contains("'Microsoft.DataFactory/factories/pipelineruns/read'")
+    ) 'The preprovision hook must require access to initialize exports and monitor the configuration run.'
+    Assert-True (
         -not $preprovision.Contains("'Microsoft.DataFactory/factories/*'")
     ) 'The preprovision hook must not use wildcard Data Factory permission checks.'
     foreach ($action in @('read', 'write', 'delete')) {
@@ -578,6 +582,65 @@ function Test-FinOpsFoundationReuse {
     Write-Host 'Validated existing FinOps foundation discovery.'
 }
 
+function Test-FinOpsExportConfiguration {
+    . (Join-Path $repositoryRoot 'hooks\finops-foundation.ps1')
+    $runId = '00000000-0000-0000-0000-000000000003'
+    $arguments = @{
+        SubscriptionId = '00000000-0000-0000-0000-000000000001'
+        ResourceGroupName = 'rg-test-finops'
+        DataFactoryName = 'test-factory'
+        MaxPollAttempts = 3
+        PollIntervalSeconds = 0
+    }
+    $script:configStates = [System.Collections.Generic.Queue[string]]::new([string[]]@('Queued', 'InProgress', 'Succeeded'))
+    $script:configExitCode = 0
+    $previousExitCode = Get-Variable -Name LASTEXITCODE -Scope Global -ErrorAction SilentlyContinue
+    $previousExitCodeValue = if ($null -ne $previousExitCode) { $previousExitCode.Value } else { $null }
+    function az {
+        $global:LASTEXITCODE = $script:configExitCode
+        $uri = $args[[array]::IndexOf($args, '--uri') + 1]
+        Assert-True ($uri.StartsWith('https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/rg-test-finops/providers/Microsoft.DataFactory/factories/test-factory/')) 'Configuration calls must remain in the selected Data Factory.'
+        if ($args -contains 'POST') {
+            Assert-True ($uri.EndsWith('/pipelines/config_ConfigureExports/createRun?api-version=2018-06-01')) 'Deployment must invoke the Microsoft export configuration pipeline only.'
+            return '{"runId":"00000000-0000-0000-0000-000000000003"}'
+        }
+        Assert-True ($args -contains 'GET' -and $uri.EndsWith('/pipelineruns/00000000-0000-0000-0000-000000000003?api-version=2018-06-01')) 'Polling must inspect the exact configuration run.'
+        @{ status = $script:configStates.Dequeue(); message = 'test status' } | ConvertTo-Json -Compress
+    }
+    try {
+        Assert-True ((Invoke-FinOpsExportConfiguration @arguments) -ceq $runId) 'Configuration must wait for the created pipeline run to succeed.'
+        foreach ($status in @('Failed', 'Cancelled', 'Unknown')) {
+            $script:configStates.Enqueue($status)
+            $failed = $false
+            try { Invoke-FinOpsExportConfiguration @arguments | Out-Null } catch { $failed = $true }
+            Assert-True $failed 'Failed or unknown pipeline states must stop deployment.'
+        }
+        $script:configStates = [System.Collections.Generic.Queue[string]]::new([string[]]@('InProgress', 'InProgress', 'InProgress'))
+        $failed = $false
+        try { Invoke-FinOpsExportConfiguration @arguments | Out-Null } catch { $failed = $true }
+        Assert-True $failed 'An unfinished configuration run must not be treated as success.'
+        $script:configExitCode = 1
+        $failed = $false
+        try { Invoke-FinOpsExportConfiguration @arguments | Out-Null } catch { $failed = $true }
+        Assert-True $failed 'Configuration API failures must stop deployment.'
+    }
+    finally {
+        if ($null -ne $previousExitCode) {
+            Set-Variable -Name LASTEXITCODE -Scope Global -Value $previousExitCodeValue
+        }
+        else {
+            Remove-Variable -Name LASTEXITCODE -Scope Global -ErrorAction SilentlyContinue
+        }
+        Remove-Variable -Name configStates, configExitCode -Scope Script
+    }
+    $hook = Get-Content -LiteralPath (Join-Path $repositoryRoot 'hooks\deploy-finops-hub.ps1') -Raw
+    Assert-True (
+        $hook.IndexOf('$configurationRunId = Invoke-FinOpsExportConfiguration') -gt $hook.IndexOf('$managedOutputs = Invoke-FinOpsDeployment') -and
+        $hook.IndexOf('$configurationRunId = Invoke-FinOpsExportConfiguration') -lt $hook.IndexOf('$resourceGroupExportsJson = @()')
+    ) 'Export configuration must finish after hub deployment and before export discovery.'
+    Write-Host 'Validated explicit Microsoft export configuration and run monitoring.'
+}
+
 function Test-LocalAzdContracts {
     $predown = Get-Content -LiteralPath (Join-Path $repositoryRoot 'hooks\predown.ps1') -Raw
     $postdown = Get-Content -LiteralPath (Join-Path $repositoryRoot 'hooks\postdown.ps1') -Raw
@@ -638,6 +701,7 @@ try {
     Test-FinOpsTriggerScriptCache
     Test-FinOpsUtcSchedules
     Test-FinOpsFoundationReuse
+    Test-FinOpsExportConfiguration
     Test-EntraCleanupContracts
     Test-TeardownInheritedApprovalRegression
     Test-PostprovisionAuthContracts

@@ -142,6 +142,11 @@ On a retry or redeployment, the hook reads the existing hub-owned Data Factory
 identity and grants its required access before the managed-export pass.
 That pass updates the complete hub. It does not repeat the initial foundation pass.
 
+After provisioning, the hook runs Microsoft's `config_ConfigureExports` pipeline
+and waits for success before it checks the daily and monthly FOCUS exports.
+This avoids relying on a settings-file event emitted before the event trigger
+was active. The configuration run ID is saved as `FINOPS_CONFIGURE_EXPORTS_RUN_ID`.
+
 Before each pass, the hook clears completed trigger-management deployment-script
 records owned by this FinOps hub. The unchanged Microsoft scripts then stop and
 restart Data Factory triggers instead of reusing a cached result.

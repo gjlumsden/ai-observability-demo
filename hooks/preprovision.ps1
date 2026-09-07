@@ -181,6 +181,8 @@ $requiredActions = @(
   'Microsoft.Consumption/budgets/write'
   'Microsoft.DataFactory/factories/write'
   'Microsoft.DataFactory/factories/read'
+  'Microsoft.DataFactory/factories/pipelines/createrun/action'
+  'Microsoft.DataFactory/factories/pipelineruns/read'
   'Microsoft.Resources/deploymentScripts/read'
   'Microsoft.Resources/deploymentScripts/write'
   'Microsoft.Resources/deploymentScripts/delete'
