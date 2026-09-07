@@ -23,6 +23,12 @@ EVENT_HUB = "AI-Usage"
 CONSUMER_GROUP = "Processor"
 
 
+def not_found_error(message, error_code):
+    error = ResourceNotFoundError(message)
+    error.error_code = error_code
+    return error
+
+
 class FakeBlobClient:
     def __init__(self, properties):
         self.properties = properties
@@ -31,7 +37,7 @@ class FakeBlobClient:
         if isinstance(self.properties, Exception):
             raise self.properties
         if self.properties is None:
-            raise ResourceNotFoundError("checkpoint not found")
+            raise not_found_error("checkpoint not found", "BlobNotFound")
         return self.properties
 
 
@@ -274,20 +280,63 @@ class CheckpointMonitorTests(unittest.TestCase):
         self.assertEqual(statuses[0].sequence_lag, -90)
         self.assertEqual(records[0].levelno, logging.WARNING)
 
-    def test_missing_checkpoint_container_error_is_not_hidden(self):
+    def test_missing_checkpoint_container_is_treated_as_no_checkpoints(self):
+        first_blob_name = checkpoint_blob_name(
+            NAMESPACE,
+            EVENT_HUB,
+            CONSUMER_GROUP,
+            "0",
+        )
+        second_blob_name = checkpoint_blob_name(
+            NAMESPACE,
+            EVENT_HUB,
+            CONSUMER_GROUP,
+            "1",
+        )
+
+        statuses, records, _ = run_monitor(
+            {
+                "0": partition(10, 30),
+                "1": partition(-1, 0, is_empty=True),
+            },
+            {
+                first_blob_name: not_found_error(
+                    "container not found",
+                    "ContainerNotFound",
+                ),
+                second_blob_name: not_found_error(
+                    "container not found",
+                    "ContainerNotFound",
+                ),
+            },
+        )
+
+        self.assertEqual(
+            [status.status for status in statuses],
+            ["missing", "idle"],
+        )
+        self.assertEqual(
+            [record.levelno for record in records],
+            [logging.WARNING, logging.INFO],
+        )
+
+    def test_unknown_checkpoint_store_not_found_error_is_not_hidden(self):
         blob_name = checkpoint_blob_name(
             NAMESPACE,
             EVENT_HUB,
             CONSUMER_GROUP,
             "0",
         )
-        error = ResourceNotFoundError("container not found")
-        error.error_code = "ContainerNotFound"
 
         with self.assertRaises(ResourceNotFoundError):
             run_monitor(
                 {"0": partition(10, 30)},
-                {blob_name: error},
+                {
+                    blob_name: not_found_error(
+                        "unexpected not found",
+                        "FilesystemNotFound",
+                    )
+                },
             )
 
     def test_telemetry_has_a_fixed_safe_dimension_set(self):

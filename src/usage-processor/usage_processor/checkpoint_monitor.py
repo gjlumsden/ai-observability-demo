@@ -8,6 +8,9 @@ from azure.core.exceptions import ResourceNotFoundError
 
 CHECKPOINT_CONTAINER_NAME = "azure-webjobs-eventhub"
 CHECKPOINT_TRACE_MESSAGE = "UsageProcessorCheckpointStatus"
+_MISSING_CHECKPOINT_ERROR_CODES = frozenset(
+    {"BlobNotFound", "ContainerNotFound"}
+)
 
 
 @dataclass(frozen=True)
@@ -192,10 +195,9 @@ def _get_checkpoint(container_client, blob_name):
             blob_name
         ).get_blob_properties()
     except ResourceNotFoundError as error:
-        error_code = getattr(error, "error_code", None)
-        if error_code and error_code != "BlobNotFound":
-            raise
-        return None
+        if _is_missing_checkpoint_error(error):
+            return None
+        raise
 
     metadata = properties.metadata or {}
     sequence_number = _parse_sequence_number(
@@ -214,6 +216,10 @@ def _parse_sequence_number(value):
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _is_missing_checkpoint_error(error):
+    return getattr(error, "error_code", None) in _MISSING_CHECKPOINT_ERROR_CODES
 
 
 def _log_status(logger, status):
