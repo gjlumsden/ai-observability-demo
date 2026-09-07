@@ -646,6 +646,20 @@ function Test-LocalAzdContracts {
     $postdown = Get-Content -LiteralPath (Join-Path $repositoryRoot 'hooks\postdown.ps1') -Raw
     $deployFinOps = Get-Content -LiteralPath (Join-Path $repositoryRoot 'hooks\deploy-finops-hub.ps1') -Raw
     $preprovision = Get-Content -LiteralPath (Join-Path $repositoryRoot 'hooks\preprovision.ps1') -Raw
+    $exportAccess = Get-Content -LiteralPath (Join-Path $repositoryRoot 'infra\modules\finops-export-access.bicep') -Raw
+    $finOpsWrapper = Get-Content -LiteralPath (Join-Path $repositoryRoot 'infra\modules\finops-hub-wrapper.bicep') -Raw
+
+    Assert-True (
+        $exportAccess.Contains("targetScope = 'resourceGroup'") -and
+        $exportAccess.Contains('scope: hubStorage') -and
+        $exportAccess.Contains('principalId: dataFactoryPrincipalId') -and
+        $exportAccess.Contains('f58310d9-a9f6-439a-9e8d-f62e7b41a168')
+    ) 'Export access administration must use the Data Factory identity and remain scoped to the hub storage account.'
+    Assert-True (
+        $finOpsWrapper.Contains("module exportStorageAccess 'finops-export-access.bicep'") -and
+        $finOpsWrapper.Contains('storageAccountName: finOpsHub.outputs.storageAccountName') -and
+        $finOpsWrapper.Contains('dataFactoryPrincipalId: finOpsHub.outputs.managedIdentityId')
+    ) 'The FinOps wrapper must provision export-identity delegation for its own storage and Data Factory.'
 
     Assert-True (
         $predown.Contains('azd env get-values --cwd $repoRoot 2>$null')

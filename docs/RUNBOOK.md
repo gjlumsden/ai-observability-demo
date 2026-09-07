@@ -147,6 +147,16 @@ and waits for success before it checks the daily and monthly FOCUS exports.
 This avoids relying on a settings-file event emitted before the event trigger
 was active. The configuration run ID is saved as `FINOPS_CONFIGURE_EXPORTS_RUN_ID`.
 
+The Data Factory identity receives `Role Based Access Control Administrator` at
+the FinOps storage-account scope. Cost Management needs this permission to grant
+each export identity access to its destination container.
+This role can manage access within that storage account, not at resource-group
+or subscription scope. See
+[Microsoft's export identity requirements](https://learn.microsoft.com/azure/cost-management-billing/costs/tutorial-improved-exports#configure-exports-for-storage-accounts-with-a-firewall).
+For stricter production separation, use a separate deployment identity to manage
+exports and their access assignments. Give the runtime identity only the permissions
+needed to run those exports.
+
 Before each pass, the hook clears completed trigger-management deployment-script
 records owned by this FinOps hub. The unchanged Microsoft scripts then stop and
 restart Data Factory triggers instead of reusing a cached result.

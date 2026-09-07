@@ -426,6 +426,8 @@ try {
     Test-BicepBuilds @(
         'infra\modules\app-service.bicep'
         'infra\modules\cost-management.bicep'
+        'infra\modules\finops-export-access.bicep'
+        'infra\modules\finops-hub-wrapper.bicep'
         'infra\modules\identity-vault.bicep'
         'infra\modules\monitoring.bicep'
         'infra\modules\usage-observability.bicep'

@@ -84,6 +84,13 @@ resource dataFactory 'Microsoft.DataFactory/factories@2018-06-01' existing = {
   name: finOpsHub.outputs.dataFactoryName
 }
 
+module exportStorageAccess 'finops-export-access.bicep' = {
+  params: {
+    storageAccountName: finOpsHub.outputs.storageAccountName
+    dataFactoryPrincipalId: finOpsHub.outputs.managedIdentityId
+  }
+}
+
 resource supportActionGroup 'Microsoft.Insights/actionGroups@2023-01-01' = {
   name: '${hubName}-alerts'
   location: 'global'
