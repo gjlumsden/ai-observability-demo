@@ -139,6 +139,7 @@ function Invoke-FinOpsDeployment {
 }
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
+. (Join-Path $PSScriptRoot 'budget-period.ps1')
 & (Join-Path $repoRoot 'scripts\verify-finops-release.ps1')
 
 $values = Get-AzdEnvironmentValues
@@ -152,13 +153,6 @@ $functionAppName = Get-RequiredValue $values 'USAGE_PROCESSOR_FUNCTION_NAME'
 $functionPrincipalId = Get-RequiredValue $values 'USAGE_PROCESSOR_PRINCIPAL_ID'
 $functionIdentityClientId = Get-RequiredValue $values 'USAGE_PROCESSOR_IDENTITY_CLIENT_ID'
 $budgetAmount = [int](Get-RequiredValue $values 'FINOPS_SUPPORT_BUDGET_AMOUNT')
-$budgetStartDate = Get-RequiredValue $values 'FINOPS_BUDGET_START_DATE'
-$budgetEndDate = if ($values.ContainsKey('FINOPS_BUDGET_END_DATE')) {
-    [string]$values['FINOPS_BUDGET_END_DATE']
-}
-else {
-    ''
-}
 $notificationEmailList = if ($values.ContainsKey('FINOPS_NOTIFICATION_EMAILS')) {
     [string]$values['FINOPS_NOTIFICATION_EMAILS']
 }
@@ -219,6 +213,21 @@ if ($tagLookupExitCode -eq 0 -and ($existingFinOpsTagsJson -join "`n").Trim() -n
 if ($LASTEXITCODE -ne 0) {
     throw "Could not create the FinOps support resource group $finOpsResourceGroupName."
 }
+
+$budgetPeriod = Get-AzureBudgetPeriod -SubscriptionId $subscriptionId `
+    -ResourceGroupName $finOpsResourceGroupName -BudgetName "$finOpsHubName-support-budget"
+$budgetStartDate = $budgetPeriod.StartDate
+$budgetEndDate = $budgetPeriod.EndDate
+foreach ($entry in @{
+    FINOPS_BUDGET_START_DATE = $budgetStartDate
+    FINOPS_BUDGET_END_DATE = $budgetEndDate
+}.GetEnumerator()) {
+    & azd env set $entry.Key $entry.Value --cwd $repoRoot | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw "Could not store $($entry.Key) in the azd environment."
+    }
+}
+Write-Host "FinOps support budget period: $budgetStartDate to $budgetEndDate"
 
 $workingDirectory = Join-Path $repoRoot '.azure'
 New-Item -ItemType Directory -Force -Path $workingDirectory | Out-Null

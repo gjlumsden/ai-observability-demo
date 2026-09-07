@@ -142,6 +142,10 @@ The support resource group has a separate monthly budget. Its default amount is
 100 in the subscription billing currency. The support group is excluded from
 the monitored FOCUS dataset.
 
+Each budget preserves its own existing start and end dates. A new budget starts
+on the first day of its creation month. The support budget does not inherit the
+main budget's older start date.
+
 The pre-provision hook checks provider registration and required subscription
 permissions. It reports missing providers without registering them.
 It also rejects legacy financial resources without deleting them.

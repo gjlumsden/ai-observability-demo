@@ -259,18 +259,7 @@ function Test-BudgetPreservationContracts {
     $mainParameters = Get-Content -LiteralPath (Join-Path $repositoryRoot 'infra\main.parameters.json') -Raw
     $deployFinOps = Get-Content -LiteralPath (Join-Path $repositoryRoot 'hooks\deploy-finops-hub.ps1') -Raw
 
-    $tokens = $null
-    $parseErrors = $null
-    $ast = [System.Management.Automation.Language.Parser]::ParseInput(
-        $preprovision, [ref]$tokens, [ref]$parseErrors
-    )
-    $dateFunction = $ast.Find({
-        param($node)
-        $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
-            $node.Name -eq 'ConvertTo-BudgetDate'
-    }, $false)
-    Assert-True ($null -ne $dateFunction) 'The budget date formatter is missing.'
-    . ([scriptblock]::Create($dateFunction.Extent.Text))
+    . (Join-Path $repositoryRoot 'hooks\budget-period.ps1')
 
     $budgetFixture = '{"startDate":"2031-08-01T00:00:00Z","endDate":"2041-08-01T00:00:00Z"}' | ConvertFrom-Json
     $previousCulture = [System.Threading.Thread]::CurrentThread.CurrentCulture
@@ -295,11 +284,9 @@ function Test-BudgetPreservationContracts {
         $preprovision.Contains('BUDGET_END_DATE')
     ) 'The preprovision hook must set BUDGET_END_DATE in the azd environment.'
     Assert-True (
-        $preprovision.Contains('timePeriod') -and $preprovision.Contains('startDate')
-    ) 'The preprovision hook must read the existing budget timePeriod from Azure.'
-    Assert-True (
-        $preprovision.Contains('AuthorizationFailed|Forbidden|does not have.*permission|403')
-    ) 'The preprovision hook must fail explicitly on authorization errors when reading the budget.'
+        $preprovision.Contains('Get-AzureBudgetPeriod') -and
+        $preprovision.Contains("-BudgetName 'ai-observability-demo-monthly-budget'")
+    ) 'The preprovision hook must resolve the main budget period from Azure.'
     Assert-True (
         @(($preprovision -split '\n') | Where-Object {
             $_ -match '20[0-9]{2}-[0-9]{2}-[0-9]{2}' -and $_ -notmatch '(?i)api[- ]?version'
@@ -316,8 +303,55 @@ function Test-BudgetPreservationContracts {
 
     # deploy-finops-hub.ps1 must forward the end date to the FinOps wrapper.
     Assert-True (
-        $deployFinOps.Contains('FINOPS_BUDGET_END_DATE') -and $deployFinOps.Contains('budgetEndDate')
-    ) 'The FinOps deployment hook must read FINOPS_BUDGET_END_DATE and pass budgetEndDate to the Bicep deployment.'
+        $deployFinOps.Contains('Get-AzureBudgetPeriod') -and
+        $deployFinOps.Contains('-ResourceGroupName $finOpsResourceGroupName -BudgetName "$finOpsHubName-support-budget"')
+    ) 'The FinOps hook must resolve its own budget rather than inherit the main budget period.'
+
+    $script:budgetResponse = '{"startDate":"2031-08-01T00:00:00Z","endDate":"2041-08-01T00:00:00Z"}'
+    $script:budgetExitCode = 0
+    function az {
+        $global:LASTEXITCODE = $script:budgetExitCode
+        $script:budgetResponse
+    }
+    $lookupArguments = @{
+        SubscriptionId = '00000000-0000-0000-0000-000000000001'
+        ResourceGroupName = 'rg-test'
+        BudgetName = 'test-budget'
+        Now = [DateTimeOffset]::Parse('2031-09-07T00:00:00Z')
+    }
+    $previousExitCode = Get-Variable -Name LASTEXITCODE -Scope Global -ErrorAction SilentlyContinue
+    $previousExitCodeValue = if ($null -ne $previousExitCode) { $previousExitCode.Value } else { $null }
+    try {
+        $existing = Get-AzureBudgetPeriod @lookupArguments
+        Assert-True ($existing.StartDate -ceq '2031-08-01' -and $existing.EndDate -ceq '2041-08-01') 'An existing budget must retain its period across a month boundary.'
+        $script:budgetExitCode = 1
+        $script:budgetResponse = 'ERROR: (NotFound) Budget not found.'
+        $fresh = Get-AzureBudgetPeriod @lookupArguments
+        Assert-True ($fresh.StartDate -ceq '2031-09-01' -and $fresh.EndDate -ceq '') 'A new support budget must start in its creation month without inheriting the main budget period.'
+        $script:budgetResponse = 'ERROR: Not Found({"error":{"code":"404","message":"No matching budget."}})'
+        $fresh = Get-AzureBudgetPeriod @lookupArguments
+        Assert-True ($fresh.StartDate -ceq '2031-09-01' -and -not $fresh.Exists) 'The Cost Management structured 404 must initialize a new budget period.'
+        foreach ($response in @('ERROR: (AuthorizationFailed) Access denied.', 'ERROR: (AuthorizationFailed) Reference contains (NotFound).', 'ERROR: (InternalServerError) Service unavailable.', '')) {
+            $script:budgetResponse = $response
+            $failed = $false
+            try { Get-AzureBudgetPeriod @lookupArguments | Out-Null } catch { $failed = $true }
+            Assert-True $failed 'A failed budget lookup must not select a new budget period.'
+        }
+        $script:budgetExitCode = 0
+        $script:budgetResponse = '{}'
+        $failed = $false
+        try { Get-AzureBudgetPeriod @lookupArguments | Out-Null } catch { $failed = $true }
+        Assert-True $failed 'A malformed existing budget must not select a new budget period.'
+    }
+    finally {
+        if ($null -ne $previousExitCode) {
+            Set-Variable -Name LASTEXITCODE -Scope Global -Value $previousExitCodeValue
+        }
+        else {
+            Remove-Variable -Name LASTEXITCODE -Scope Global -ErrorAction SilentlyContinue
+        }
+        Remove-Variable -Name budgetResponse, budgetExitCode -Scope Script
+    }
 
     Write-Host 'Validated budget start and end date preservation contracts.'
 }
@@ -367,6 +401,8 @@ Push-Location $repositoryRoot
 try {
     Test-PowerShellSyntax @(
         'hooks\preprovision.ps1'
+        'hooks\budget-period.ps1'
+        'hooks\deploy-finops-hub.ps1'
         'hooks\postprovision.ps1'
         'hooks\predown.ps1'
         'hooks\postdown.ps1'

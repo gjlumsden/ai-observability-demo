@@ -1,6 +1,7 @@
 $ErrorActionPreference = 'Stop'
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
+. (Join-Path $PSScriptRoot 'budget-period.ps1')
 foreach ($command in @('az', 'azd')) {
     if (-not (Get-Command $command -ErrorAction SilentlyContinue)) {
         throw "$command is required for the deployment lifecycle."
@@ -20,14 +21,6 @@ function Get-AzdEnvironmentValues {
       }
   }
   return $values
-}
-
-function ConvertTo-BudgetDate {
-    param([Parameter(Mandatory = $true)][DateTimeOffset] $Value)
-
-    return $Value.ToUniversalTime().ToString(
-        'yyyy-MM-dd', [System.Globalization.CultureInfo]::InvariantCulture
-    )
 }
 
 function Test-ActionMatch {
@@ -324,41 +317,11 @@ if ($deletedVaultName -and $resourceGroupName) {
 # Preserve the existing budget start and end dates to avoid ARM rejecting start-date updates.
 # The preprovision hook runs before azd provision so that BUDGET_START_DATE and BUDGET_END_DATE
 # are set before main.bicep is deployed; main.parameters.json passes these through as parameters.
-$budgetStartDate = ''
-$budgetEndDate = ''
-if ($resourceGroupName) {
-    $mainRgId = "/subscriptions/$subscriptionId/resourceGroups/$resourceGroupName"
-    $budgetUri = "https://management.azure.com${mainRgId}/providers/Microsoft.Consumption/budgets/ai-observability-demo-monthly-budget?api-version=2024-08-01"
-    $budgetOutput = & az rest `
-        --only-show-errors `
-        --method GET `
-        --uri $budgetUri `
-        --output json 2>&1
-    if ($LASTEXITCODE -eq 0) {
-        if (-not $budgetOutput) {
-            throw 'The budget lookup returned an empty response.'
-        }
-        $existingBudget = ($budgetOutput -join "`n" | ConvertFrom-Json)
-        $budgetStartDate = ConvertTo-BudgetDate $existingBudget.properties.timePeriod.startDate
-        if ($existingBudget.properties.timePeriod.endDate) {
-            $budgetEndDate = ConvertTo-BudgetDate $existingBudget.properties.timePeriod.endDate
-        }
-        Write-Host "Preserved existing budget period: $budgetStartDate to $budgetEndDate"
-    } elseif (($budgetOutput -join "`n") -match '\((ResourceNotFound|ResourceGroupNotFound|BudgetNotFound|NotFound|404)\)') {
-        # Budget does not exist yet; choose the first day of the current UTC month.
-        $budgetStartDate = [System.DateTime]::UtcNow.ToString(
-            'yyyy-MM-01', [System.Globalization.CultureInfo]::InvariantCulture
-        )
-        Write-Host "Budget not found; using start date: $budgetStartDate"
-    } elseif (($budgetOutput -join "`n") -match 'AuthorizationFailed|Forbidden|does not have.*permission|403') {
-        throw "Could not read the existing budget to preserve its start date (authorization denied): $($budgetOutput -join "`n")"
-    } else {
-        throw "Could not read the existing budget to preserve its start date: $($budgetOutput -join "`n")"
-    }
-}
-if (-not $budgetStartDate) {
-    throw 'A resource group and a valid budget start date are required before deployment.'
-}
+$budgetPeriod = Get-AzureBudgetPeriod -SubscriptionId $subscriptionId `
+    -ResourceGroupName $resourceGroupName -BudgetName 'ai-observability-demo-monthly-budget'
+$budgetStartDate = $budgetPeriod.StartDate
+$budgetEndDate = $budgetPeriod.EndDate
+Write-Host "Main budget period: $budgetStartDate to $budgetEndDate"
 
 & azd env set BUDGET_START_DATE $budgetStartDate --cwd $repoRoot | Out-Null
 if ($LASTEXITCODE -ne 0) {
