@@ -74,6 +74,10 @@ resource webApp 'Microsoft.Web/sites@2024-04-01' = {
           value: 'true'
         }
         {
+          name: 'NPM_CONFIG_REGISTRY'
+          value: 'https://packagefeedproxy.microsoft.io/npm/'
+        }
+        {
           name: 'APIM_BASE_URL'
           value: apimBaseUrl
         }
@@ -144,7 +148,7 @@ resource webAppAuthSettings 'Microsoft.Web/sites/config@2024-04-01' = {
       azureActiveDirectory: {
         // Disabled until postprovision creates the Entra app registration and populates the real
         // client ID/secret; a placeholder client ID cannot be enabled safely. The lifecycle/hooks
-        // owner finalizes this with `az webapp auth update` once entraClientId is known.
+        // owner finalizes this through the authsettingsV2 ARM API once entraClientId is known.
         enabled: !empty(entraClientId)
         registration: {
           clientId: entraClientId

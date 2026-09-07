@@ -266,8 +266,8 @@ resource checkpointHealthAlert 'Microsoft.Insights/scheduledQueryRules@2023-12-0
           operator: 'GreaterThan'
           threshold: 0
           failingPeriods: {
-            numberOfEvaluationPeriods: 3
-            minFailingPeriodsToAlert: 3
+            numberOfEvaluationPeriods: 1
+            minFailingPeriodsToAlert: 1
           }
         }
       ]
@@ -303,8 +303,8 @@ resource staleUsageAlert 'Microsoft.Insights/scheduledQueryRules@2023-12-01' = {
           operator: 'GreaterThan'
           threshold: 30
           failingPeriods: {
-            numberOfEvaluationPeriods: 2
-            minFailingPeriodsToAlert: 2
+            numberOfEvaluationPeriods: 1
+            minFailingPeriodsToAlert: 1
           }
         }
       ]
@@ -376,8 +376,8 @@ resource allocationStaleAlert 'Microsoft.Insights/scheduledQueryRules@2023-12-01
           operator: 'GreaterThan'
           threshold: 36
           failingPeriods: {
-            numberOfEvaluationPeriods: 2
-            minFailingPeriodsToAlert: 2
+            numberOfEvaluationPeriods: 1
+            minFailingPeriodsToAlert: 1
           }
         }
       ]
@@ -412,8 +412,8 @@ resource reconciliationDriftAlert 'Microsoft.Insights/scheduledQueryRules@2023-1
           operator: 'GreaterThan'
           threshold: 0
           failingPeriods: {
-            numberOfEvaluationPeriods: 3
-            minFailingPeriodsToAlert: 3
+            numberOfEvaluationPeriods: 1
+            minFailingPeriodsToAlert: 1
           }
         }
       ]

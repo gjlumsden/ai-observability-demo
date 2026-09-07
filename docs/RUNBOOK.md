@@ -12,7 +12,7 @@ Do not add a virtual network only for this demo. Assess private networking, Prem
 
 - Azure CLI with Bicep CLI support.
 - Azure Developer CLI (`azd`).
-- PowerShell 7.
+- PowerShell 7.2 or later.
 - Node.js 24.
 - Rights to create two resource groups, resources, role assignments, policy
   assignments, budgets, and Cost Management exports.
@@ -58,11 +58,22 @@ Run a Bicep build:
 az bicep build --file .\infra\main.bicep --stdout | Out-Null
 ```
 
-Run the Azure Developer CLI provider preview:
+Run a direct ARM Provider preview with the active environment's resolved values:
 
 ```powershell
-azd provision --preview --environment <environment> --no-prompt
+az deployment group what-if `
+  --subscription <subscription-id> `
+  --resource-group <main-resource-group> `
+  --template-file .\infra\main.bicep `
+  --parameters "location=<azure-location>" "appServiceLocation=<app-service-location>" "principalId=<entra-object-id>" `
+  --validation-level Provider `
+  --no-pretty-print `
+  --output json
 ```
+
+Do not pass the unresolved `azd` parameter file directly to Azure CLI.
+Do not run deployment hooks as a read-only preflight. The preprovision hook can
+recover a soft-deleted Key Vault. A direct ARM preview does not run that hook.
 
 Run the deterministic attribution check:
 
@@ -111,7 +122,7 @@ The post-provision hook:
 
 - Creates or reuses the AI Observability Demo Entra application.
 - Creates the `access_as_user` delegated scope.
-- Generates a secure web session secret.
+- Configures the App Service identity provider and token store.
 - Updates the APIM Entra audience.
 - Updates web application authentication settings.
 - Deploys Microsoft FinOps hubs v14 in `<main-resource-group>-finops`.
@@ -122,21 +133,87 @@ The post-provision hook:
 - Grants the processor Cost Management Reader at subscription scope.
 - Generates or preserves the weather MCP key.
 
-The FinOps deployment uses two passes. The first pass deploys the hub without
+A new FinOps deployment uses two passes. The first pass deploys the hub without
 managed exports. The hook then grants Data Factory access. The second pass
 enables one daily month-to-date and one monthly previous-month FOCUS export.
 The hook rejects exports outside the exact main resource-group scope.
+
+On a retry or redeployment, the hook reads the existing hub-owned Data Factory
+identity and grants its required access before the managed-export pass.
+That pass updates the complete hub. It does not repeat the initial foundation pass.
+
+After provisioning, the hook runs Microsoft's `config_ConfigureExports` pipeline
+and waits for success before it checks the daily and monthly FOCUS exports.
+This avoids relying on a settings-file event emitted before the event trigger
+was active. The configuration run ID is saved as `FINOPS_CONFIGURE_EXPORTS_RUN_ID`.
+
+The Data Factory identity receives `Role Based Access Control Administrator` at
+the FinOps storage-account scope. Cost Management needs this permission to grant
+each export identity access to its destination container.
+This role can manage access within that storage account, not at resource-group
+or subscription scope. See
+[Microsoft's export identity requirements](https://learn.microsoft.com/azure/cost-management-billing/costs/tutorial-improved-exports#configure-exports-for-storage-accounts-with-a-firewall).
+For stricter production separation, use a separate deployment identity to manage
+exports and their access assignments. Give the runtime identity only the permissions
+needed to run those exports.
+
+Before each pass, the hook clears completed trigger-management deployment-script
+records owned by this FinOps hub. The unchanged Microsoft scripts then stop and
+restart Data Factory triggers instead of reusing a cached result.
+The hook retains running or failed script records for diagnosis and stops.
+This step does not delete Data Factory triggers, pipelines, storage, or billing data.
+The vendored Microsoft source remains unchanged.
+
+The hook also applies a narrow compatibility correction to the compiled template
+for [microsoft/finops-toolkit#2157](https://github.com/microsoft/finops-toolkit/issues/2157).
+It appends `Z` to schedule start times only when the resolved time zone is `UTC`.
+Mapped local-time schedules retain their original start times.
+The hook stops if the three expected upstream definitions change.
 
 The support resource group has a separate monthly budget. Its default amount is
 100 in the subscription billing currency. The support group is excluded from
 the monitored FOCUS dataset.
 
-The pre-provision hook registers required providers and checks all required
-subscription permissions. It also removes resources from the legacy financial
-pipeline when they exist.
+Each budget preserves its own existing start and end dates. A new budget starts
+on the first day of its creation month. The support budget does not inherit the
+main budget's older start date.
 
-The post-deploy hook checks the web health endpoint.
+The pre-provision hook checks provider registration and required subscription
+permissions. It reports missing providers without registering them.
+It also rejects legacy financial resources without deleting them.
+
+For an in-place upgrade, inspect the exact legacy resource IDs and obtain
+explicit cleanup or migration approval. Preserve billing history unless its
+deletion is approved. Retain unrelated resources and the Entra app registration.
+Do not run the full teardown wrapper when the upgrade must preserve the app,
+Foundry deployments, APIM, or workspace.
+
+The post-deploy hook checks the web health endpoint and all four usage Function registrations.
 It also installs the pinned Foundry Connections extension, configures the encrypted MCP connection, and upserts `weather-forecast-agent`.
+
+If only the usage processor needs a package repair, deploy that service:
+
+```powershell
+azd deploy usageProcessor --no-prompt
+```
+
+Package publication does not prove that the Python worker loaded the functions.
+The deployed Python 3.12 worker requires `typing.List[EventHubEvent]` for the batch
+binding. A built-in `list[EventHubEvent]` annotation prevented registration.
+
+If a resumed deployment does not run the project post-deploy hook, run it explicitly:
+
+```powershell
+pwsh -NoProfile -File .\hooks\postdeploy.ps1
+```
+
+The startup checks do not invoke a model or establish functional acceptance.
+
+Before the first Event Hubs invocation, the platform checkpoint container can be absent.
+The checkpoint monitor treats confirmed `ContainerNotFound` and `BlobNotFound`
+responses as absent checkpoints. Empty partitions report `idle`. Non-empty
+partitions without checkpoints report `missing` and retain their actual partition
+position. Authorization failures and unknown storage errors still stop the monitor.
 
 ## Identity checks
 
@@ -148,6 +225,20 @@ Confirm the Entra application has:
 - A current client credential.
 
 The demo hook creates a 30-day client credential to comply with restrictive tenant credential lifetime policies.
+
+The hook updates `authsettingsV2` in one ARM request. It preserves unrelated
+authentication settings and reapplies the Entra issuer, client ID, audiences,
+calling-client restriction, token store, and HTTPS requirement.
+It does not depend on the installed Azure CLI `authV2` extension.
+
+After FinOps configuration succeeds, resume a failed authentication step without
+redeploying FinOps:
+
+```powershell
+pwsh -NoProfile -File .\hooks\postprovision.ps1 -Stage Authentication
+```
+
+The default `All` stage still runs the complete post-provision workflow.
 
 Confirm APIM rejects:
 
@@ -596,15 +687,15 @@ The `azd` pre-down and post-down hooks remove external role assignments and both
 active resource groups. They do not remove the Entra app registration because
 the post-provision hook creates it outside the Bicep deployment.
 
-Run the complete cleanup command:
+Use the teardown wrapper to remove the active Azure deployment:
 
 ```powershell
-pwsh ./demo-scripts/teardown.ps1
+pwsh .\demo-scripts\teardown.ps1
 ```
 
 The script:
 
-1. Reads `ENTRA_CLIENT_ID` before it removes the `azd` environment.
+1. Reads `ENTRA_CLIENT_ID` from the active `azd` environment.
 2. Requires the exact confirmation text `delete ai observability demo`.
 3. Runs `azd down --force --purge`.
 4. Removes the Data Factory and Function external role assignments.
@@ -612,8 +703,8 @@ The script:
 6. Checks whether the main resource group still exists.
 7. Deletes the main group directly if `azd` left resources.
 8. Purges soft-deleted Foundry and API Management services.
-9. Deletes the Entra app registration after Azure resource deletion succeeds.
-10. Removes the local `azd` environment.
+9. Retains the Entra app registration unless separate deletion approval was supplied.
+10. Retains the local `azd` environment for reuse.
 11. Returns a nonzero exit code if any cleanup stage is incomplete.
 
 The Azure deletion removes active resources, dashboards, tables, budgets,
@@ -627,4 +718,7 @@ deployment. This behavior preserves the HMAC pseudonym key across recovery.
 The Claude Marketplace subscription is outside the resource group. Review or
 remove that subscription separately when it is no longer required.
 
-The confirmation applies to both the Azure resources and the Entra app registration.
+The initial confirmation applies only to the Azure resource teardown.
+To also delete the Entra app registration, pass `-DeleteEntraApplication`.
+The wrapper then requires the separate text `delete Entra app registration`.
+If that confirmation is declined, it retains the registration.

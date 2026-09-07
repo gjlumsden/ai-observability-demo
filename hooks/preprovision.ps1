@@ -1,6 +1,7 @@
 $ErrorActionPreference = 'Stop'
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
+. (Join-Path $PSScriptRoot 'budget-period.ps1')
 foreach ($command in @('az', 'azd')) {
     if (-not (Get-Command $command -ErrorAction SilentlyContinue)) {
         throw "$command is required for the deployment lifecycle."
@@ -179,7 +180,14 @@ $requiredActions = @(
   'Microsoft.CostManagement/exports/delete'
   'Microsoft.Consumption/budgets/write'
   'Microsoft.DataFactory/factories/write'
+  'Microsoft.DataFactory/factories/read'
+  'Microsoft.DataFactory/factories/pipelines/createrun/action'
+  'Microsoft.DataFactory/factories/pipelineruns/read'
+  'Microsoft.Resources/deploymentScripts/read'
+  'Microsoft.Resources/deploymentScripts/write'
+  'Microsoft.Resources/deploymentScripts/delete'
   'Microsoft.Web/sites/config/write'
+  'Microsoft.Web/sites/functions/read'
 )
 $missingActions = @($requiredActions | Where-Object { -not (Test-AzurePermission $permissions $_) })
 if ($missingActions.Count -gt 0) {
@@ -286,6 +294,10 @@ if ($deletedVaultName -and $resourceGroupName) {
     $deletedVault = $deletedVaultJson -join "`n" | ConvertFrom-Json
     $deletedVaultLocation = if ($deletedVault.location) { $deletedVault.location } else { $location }
     Write-Host "Recovering purge-protected Key Vault $deletedVaultName..."
+    # Create/confirm the resource group without --tags so that existing environment-level
+    # tags (for example, security-control tags applied by the subscription owner) are
+    # preserved. Azure ARM leaves existing tags unchanged when --tags is omitted from
+    # az group create.
     & az group create `
       --subscription $subscriptionId `
       --name $resourceGroupName `
@@ -307,6 +319,24 @@ if ($deletedVaultName -and $resourceGroupName) {
       throw "Could not recover purge-protected Key Vault $deletedVaultName."
     }
   }
+}
+
+# Preserve the existing budget start and end dates to avoid ARM rejecting start-date updates.
+# The preprovision hook runs before azd provision so that BUDGET_START_DATE and BUDGET_END_DATE
+# are set before main.bicep is deployed; main.parameters.json passes these through as parameters.
+$budgetPeriod = Get-AzureBudgetPeriod -SubscriptionId $subscriptionId `
+    -ResourceGroupName $resourceGroupName -BudgetName 'ai-observability-demo-monthly-budget'
+$budgetStartDate = $budgetPeriod.StartDate
+$budgetEndDate = $budgetPeriod.EndDate
+Write-Host "Main budget period: $budgetStartDate to $budgetEndDate"
+
+& azd env set BUDGET_START_DATE $budgetStartDate --cwd $repoRoot | Out-Null
+if ($LASTEXITCODE -ne 0) {
+    throw 'Could not store BUDGET_START_DATE in the azd environment.'
+}
+& azd env set BUDGET_END_DATE $budgetEndDate --cwd $repoRoot | Out-Null
+if ($LASTEXITCODE -ne 0) {
+    throw 'Could not store BUDGET_END_DATE in the azd environment.'
 }
 
 & (Join-Path $repoRoot 'scripts\verify-finops-release.ps1')

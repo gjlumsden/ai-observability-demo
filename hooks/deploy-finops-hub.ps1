@@ -122,6 +122,9 @@ function Invoke-FinOpsDeployment {
         [System.Text.UTF8Encoding]::new($false)
     )
 
+    Clear-FinOpsTriggerScriptCache -SubscriptionId $subscriptionId `
+        -ResourceGroupName $finOpsResourceGroupName -HubName $finOpsHubName
+
     $output = & az deployment group create `
         --only-show-errors `
         --subscription $subscriptionId `
@@ -139,6 +142,10 @@ function Invoke-FinOpsDeployment {
 }
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
+. (Join-Path $PSScriptRoot 'budget-period.ps1')
+. (Join-Path $PSScriptRoot 'finops-script-cache.ps1')
+. (Join-Path $PSScriptRoot 'finops-template.ps1')
+. (Join-Path $PSScriptRoot 'finops-foundation.ps1')
 & (Join-Path $repoRoot 'scripts\verify-finops-release.ps1')
 
 $values = Get-AzdEnvironmentValues
@@ -152,7 +159,6 @@ $functionAppName = Get-RequiredValue $values 'USAGE_PROCESSOR_FUNCTION_NAME'
 $functionPrincipalId = Get-RequiredValue $values 'USAGE_PROCESSOR_PRINCIPAL_ID'
 $functionIdentityClientId = Get-RequiredValue $values 'USAGE_PROCESSOR_IDENTITY_CLIENT_ID'
 $budgetAmount = [int](Get-RequiredValue $values 'FINOPS_SUPPORT_BUDGET_AMOUNT')
-$budgetStartDate = Get-RequiredValue $values 'FINOPS_BUDGET_START_DATE'
 $notificationEmailList = if ($values.ContainsKey('FINOPS_NOTIFICATION_EMAILS')) {
     [string]$values['FINOPS_NOTIFICATION_EMAILS']
 }
@@ -175,16 +181,59 @@ if ($LASTEXITCODE -ne 0) {
     throw "Could not select Azure subscription $subscriptionId."
 }
 
+# Read any existing resource group tags before creating/updating, so that
+# environment-level tags (for example, security-control tags applied by the
+# subscription owner) are preserved alongside the workload-specific tags.
+$existingFinOpsTagsJson = & az group show `
+    --subscription $subscriptionId `
+    --name $finOpsResourceGroupName `
+    --query tags `
+    --only-show-errors `
+    --output json 2>&1
+$tagLookupExitCode = $LASTEXITCODE
+if ($tagLookupExitCode -ne 0 -and ($existingFinOpsTagsJson -join "`n") -notmatch '\((ResourceGroupNotFound|404)\)') {
+    throw "Could not read existing FinOps resource group tags: $($existingFinOpsTagsJson -join "`n")"
+}
+if ($tagLookupExitCode -eq 0 -and -not $existingFinOpsTagsJson) {
+    throw 'The FinOps resource group tag lookup returned an empty response.'
+}
+$finOpsTagList = [System.Collections.Generic.List[string]]@(
+    'workload=ai-observability'
+    'component=finops-hub'
+)
+if ($tagLookupExitCode -eq 0 -and ($existingFinOpsTagsJson -join "`n").Trim() -ne 'null') {
+    $existingFinOpsTags = ($existingFinOpsTagsJson -join "`n" | ConvertFrom-Json)
+    foreach ($prop in $existingFinOpsTags.PSObject.Properties) {
+        if (-not ($finOpsTagList | Where-Object { $_ -like "$($prop.Name)=*" })) {
+            $finOpsTagList.Add("$($prop.Name)=$($prop.Value)")
+        }
+    }
+}
 & az group create `
     --subscription $subscriptionId `
     --name $finOpsResourceGroupName `
     --location $finOpsLocation `
-    --tags workload=ai-observability component=finops-hub `
+    --tags @finOpsTagList `
     --only-show-errors `
     --output none
 if ($LASTEXITCODE -ne 0) {
     throw "Could not create the FinOps support resource group $finOpsResourceGroupName."
 }
+
+$budgetPeriod = Get-AzureBudgetPeriod -SubscriptionId $subscriptionId `
+    -ResourceGroupName $finOpsResourceGroupName -BudgetName "$finOpsHubName-support-budget"
+$budgetStartDate = $budgetPeriod.StartDate
+$budgetEndDate = $budgetPeriod.EndDate
+foreach ($entry in @{
+    FINOPS_BUDGET_START_DATE = $budgetStartDate
+    FINOPS_BUDGET_END_DATE = $budgetEndDate
+}.GetEnumerator()) {
+    & azd env set $entry.Key $entry.Value --cwd $repoRoot | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw "Could not store $($entry.Key) in the azd environment."
+    }
+}
+Write-Host "FinOps support budget period: $budgetStartDate to $budgetEndDate"
 
 $workingDirectory = Join-Path $repoRoot '.azure'
 New-Item -ItemType Directory -Force -Path $workingDirectory | Out-Null
@@ -202,6 +251,7 @@ $parameters = @{
         monthlyBudgetAmount = @{ value = $budgetAmount }
         notificationEmails = @{ value = $notificationEmails }
         budgetStartDate = @{ value = $budgetStartDate }
+        budgetEndDate = @{ value = $budgetEndDate }
         tags = @{
             value = @{
                 env = 'demo'
@@ -225,10 +275,15 @@ try {
     if ($LASTEXITCODE -ne 0) {
         throw 'Could not compile the vendored FinOps hub wrapper.'
     }
+    Update-FinOpsUtcSchedules -TemplateFile $templateFile
 
-    Write-Host "Deploying FinOps hub foundation to $finOpsResourceGroupName..."
-    $foundationOutputs = Invoke-FinOpsDeployment $false 'finops-hub-foundation'
-    $dataFactoryPrincipalId = [string]$foundationOutputs.dataFactoryPrincipalId.value
+    $dataFactoryPrincipalId = Get-FinOpsDataFactoryPrincipalId -SubscriptionId $subscriptionId `
+        -ResourceGroupName $finOpsResourceGroupName -HubName $finOpsHubName
+    if (-not $dataFactoryPrincipalId) {
+        Write-Host "Deploying FinOps hub foundation to $finOpsResourceGroupName..."
+        $foundationOutputs = Invoke-FinOpsDeployment $false 'finops-hub-foundation'
+        $dataFactoryPrincipalId = [string]$foundationOutputs.dataFactoryPrincipalId.value
+    }
     if (-not $dataFactoryPrincipalId) {
         throw 'The FinOps hub deployment did not return its Data Factory principal ID.'
     }
@@ -248,6 +303,9 @@ try {
     if ([string]$managedOutputs.monitoredResourceGroupId.value -ine $mainResourceGroupId) {
         throw 'The FinOps hub returned a monitored scope that differs from the main resource group.'
     }
+    $configurationRunId = Invoke-FinOpsExportConfiguration -SubscriptionId $subscriptionId `
+        -ResourceGroupName $finOpsResourceGroupName -DataFactoryName ([string]$managedOutputs.dataFactoryName.value)
+    Set-AzdValue 'FINOPS_CONFIGURE_EXPORTS_RUN_ID' $configurationRunId
 
     $resourceGroupExportsJson = @()
     for ($attempt = 1; $attempt -le 12; $attempt++) {

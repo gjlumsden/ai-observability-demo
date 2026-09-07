@@ -69,7 +69,7 @@ resource secretBootstrap 'Microsoft.Resources/deploymentScripts@2023-08-01' = {
     }
   }
   properties: {
-    azCliVersion: '2.64.0'
+    azCliVersion: '2.89.0'
     cleanupPreference: 'Always'
     forceUpdateTag: hmacBootstrapRunId
     retentionInterval: 'P1D'
@@ -90,6 +90,13 @@ resource secretBootstrap 'Microsoft.Resources/deploymentScripts@2023-08-01' = {
     ]
     scriptContent: '''
       set -euo pipefail
+
+      for tool in curl jq openssl; do
+        if ! command -v "$tool" >/dev/null; then
+          echo "Required bootstrap tool is unavailable: $tool" >&2
+          exit 1
+        fi
+      done
 
       create_secret() {
         secret_value="$(openssl rand -base64 48 | tr -d '\n')"

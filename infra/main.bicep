@@ -34,8 +34,11 @@ param finOpsMonthlyBudgetAmount int = 100
 @description('Optional email recipients for the budget warning and critical alerts.')
 param costNotificationEmails string[] = []
 
-@description('First day of the active budget month in UTC.')
+@description('First day of the active budget month in UTC (yyyy-MM-dd). Always provided by the preprovision hook to preserve existing budget start dates.')
 param budgetStartDate string = utcNow('yyyy-MM-01')
+
+@description('Optional last day of the budget period in UTC (yyyy-MM-dd). Preserved from any existing budget by the preprovision hook.')
+param budgetEndDate string = ''
 
 @description('A non-sensitive value that reruns the idempotent HMAC key bootstrap.')
 param hmacBootstrapRunId string = utcNow('yyyyMMddHHmmss')
@@ -73,6 +76,7 @@ module costManagement 'modules/cost-management.bicep' = {
     monthlyBudgetAmount: monthlyBudgetAmount
     notificationEmails: costNotificationEmails
     budgetStartDate: budgetStartDate
+    budgetEndDate: budgetEndDate
   }
 }
 
@@ -310,7 +314,6 @@ output FINOPS_RESOURCE_GROUP_NAME string = finOpsResourceGroupName
 output FINOPS_HUB_NAME string = finOpsHubName
 output FINOPS_LOCATION string = usageLocation
 output FINOPS_SUPPORT_BUDGET_AMOUNT int = finOpsMonthlyBudgetAmount
-output FINOPS_BUDGET_START_DATE string = budgetStartDate
 output FINOPS_NOTIFICATION_EMAILS string = join(costNotificationEmails, ';')
 output GRAFANA_DASHBOARD_ID string = grafanaDashboard.outputs.dashboardId
 output WEATHER_MCP_API_URL string = weatherMcp.outputs.mcpServerUrl

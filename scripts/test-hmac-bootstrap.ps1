@@ -76,6 +76,15 @@ function Test-HmacBootstrapContracts {
     $identityVault = Get-Content -LiteralPath (Join-Path $repositoryRoot 'infra\modules\identity-vault.bicep') -Raw
 
     Assert-True (
+        $identityVault.Contains("azCliVersion: '2.89.0'")
+    ) 'The bootstrap must use the pinned Azure Linux execution image that includes jq.'
+    Assert-True (
+        $identityVault.Contains('for tool in curl jq openssl; do') -and
+        $identityVault.Contains('command -v "$tool"') -and
+        $identityVault.IndexOf('for tool in curl jq openssl; do') -lt $identityVault.IndexOf('for attempt in $(seq 1 60); do')
+    ) 'Missing bootstrap dependencies must fail before the Key Vault retry loop.'
+
+    Assert-True (
         $identityVault.Contains("--write-out '%{http_code}'")
     ) 'The HMAC bootstrap no longer records the Key Vault secret GET status code.'
     Assert-True (
@@ -182,6 +191,26 @@ function Test-FlexConsumptionRuntimeContracts {
     Write-Host 'Validated Flex Consumption runtime and checkpoint threshold settings.'
 }
 
+function Test-RemoteBuildFeedContracts {
+    $processorModule = Get-Content -LiteralPath (Join-Path $repositoryRoot 'infra\modules\usage-processor.bicep') -Raw
+    $appServiceModule = Get-Content -LiteralPath (Join-Path $repositoryRoot 'infra\modules\app-service.bicep') -Raw
+
+    Assert-True (
+        $processorModule.Contains("PIP_INDEX_URL: 'https://packagefeedproxy.microsoft.io/pypi/simple'")
+    ) 'The Flex Consumption Function App must set PIP_INDEX_URL for remote Python builds.'
+    Assert-True (
+        $appServiceModule -match "(?s)name: 'SCM_DO_BUILD_DURING_DEPLOYMENT'\s+value: 'true'"
+    ) 'The web app must keep SCM_DO_BUILD_DURING_DEPLOYMENT enabled for remote builds.'
+    Assert-True (
+        $appServiceModule -match "(?s)name: 'NPM_CONFIG_REGISTRY'\s+value: 'https://packagefeedproxy.microsoft.io/npm/'"
+    ) 'The web app must set NPM_CONFIG_REGISTRY for remote npm builds.'
+    Assert-True (
+        -not $appServiceModule.Contains('NPM_CONFIG_REPLACE_REGISTRY_HOST')
+    ) 'The web app must not set NPM_CONFIG_REPLACE_REGISTRY_HOST.'
+
+    Write-Host 'Validated remote build package feed contracts.'
+}
+
 function Test-BlobDiagnosticsContracts {
     $storageModule = Get-Content -LiteralPath (Join-Path $repositoryRoot 'infra\modules\usage-storage.bicep') -Raw
     $alertsModule = Get-Content -LiteralPath (Join-Path $repositoryRoot 'infra\modules\usage-alerts.bicep') -Raw
@@ -264,12 +293,29 @@ function Test-CheckpointAlertContracts {
         $checkpointBlock.Contains("description: 'Detects partitions whose latest checkpoint status is stale, missing, or invalid while ignoring healthy, lagging, and idle partitions.'")
     ) 'The checkpoint health alert description must match the final status contract.'
     Assert-True (
-        $checkpointBlock.Contains('numberOfEvaluationPeriods: 3') -and
-        $checkpointBlock.Contains('minFailingPeriodsToAlert: 3')
-    ) 'The checkpoint health alert must require three of three failing evaluation periods.'
+        $checkpointBlock.Contains('numberOfEvaluationPeriods: 1') -and
+        $checkpointBlock.Contains('minFailingPeriodsToAlert: 1')
+    ) 'The latest checkpoint snapshot must use one evaluation period without a TimeGenerated projection.'
 
     Write-Host 'Validated checkpoint health alert JSON telemetry and outage filters.'
 }
+
+function Test-SnapshotAlertEvaluationContracts {
+    $alertsModule = Get-Content -LiteralPath (Join-Path $repositoryRoot 'infra\modules\usage-alerts.bicep') -Raw
+    foreach ($name in @('checkpointHealthAlert', 'staleUsageAlert', 'allocationStaleAlert', 'reconciliationDriftAlert')) {
+        $resource = [regex]::Match(
+            $alertsModule,
+            "(?ms)^resource $name 'Microsoft\.Insights/scheduledQueryRules@2023-12-01' = \{.*?^\}"
+        )
+        Assert-True $resource.Success "The snapshot alert $name is missing."
+        Assert-True (
+            $resource.Value -match '\bnumberOfEvaluationPeriods:\s*1\b' -and
+            $resource.Value -match '\bminFailingPeriodsToAlert:\s*1\b'
+        ) "The snapshot alert $name must use one evaluation period without a datetime output column."
+    }
+    Write-Host 'Validated single-period evaluation for snapshot log alerts.'
+}
+
 function Test-AllocationFreshnessAlertContracts {
     $alertsModule = Get-Content -LiteralPath (Join-Path $repositoryRoot 'infra\modules\usage-alerts.bicep') -Raw
     $freshnessStart = $alertsModule.IndexOf("resource allocationStaleAlert 'Microsoft.Insights/scheduledQueryRules@2023-12-01' = {")
@@ -378,8 +424,13 @@ function Test-MonitoringWorkbookContracts {
 Push-Location $repositoryRoot
 try {
     Test-BicepBuilds @(
+        'infra\modules\app-service.bicep'
+        'infra\modules\cost-management.bicep'
+        'infra\modules\finops-export-access.bicep'
+        'infra\modules\finops-hub-wrapper.bicep'
         'infra\modules\identity-vault.bicep'
         'infra\modules\monitoring.bicep'
+        'infra\modules\usage-observability.bicep'
         'infra\modules\usage-processor.bicep'
         'infra\modules\usage-storage.bicep'
         'infra\modules\usage-alerts.bicep'
@@ -387,8 +438,10 @@ try {
     Test-HmacBootstrapContracts
     Test-AllocationObservabilityContracts
     Test-FlexConsumptionRuntimeContracts
+    Test-RemoteBuildFeedContracts
     Test-BlobDiagnosticsContracts
     Test-CheckpointAlertContracts
+    Test-SnapshotAlertEvaluationContracts
     Test-AllocationFreshnessAlertContracts
     Test-ReconciliationAlertContracts
     Test-MonitoringWorkbookContracts

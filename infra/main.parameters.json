@@ -10,6 +10,12 @@
     },
     "principalId": {
       "value": "${AZURE_PRINCIPAL_ID}"
+    },
+    "budgetStartDate": {
+      "value": "${BUDGET_START_DATE}"
+    },
+    "budgetEndDate": {
+      "value": "${BUDGET_END_DATE}"
     }
   }
 }

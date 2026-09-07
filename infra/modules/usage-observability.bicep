@@ -13,7 +13,7 @@ param resourceSuffix string
 param logAnalyticsWorkspaceId string
 
 var cleanSuffix = toLower(replace(resourceSuffix, '-', ''))
-var dataCollectionRuleName = 'ai-observability-usage-dcr-${cleanSuffix}'
+var dataCollectionRuleName = 'aiobs-usage-dcr-${cleanSuffix}'
 var usageTableName = 'AIRequestUsage_CL'
 var allocationTableName = 'AICostAllocation_CL'
 var usageStreamName = 'Custom-${usageTableName}'

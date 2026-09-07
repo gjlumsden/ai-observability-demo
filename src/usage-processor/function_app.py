@@ -1,4 +1,5 @@
 import logging
+from typing import List
 
 import azure.functions as func
 
@@ -22,7 +23,7 @@ LOGGER = logging.getLogger("usage_processor.functions")
     consumer_group="%AI_USAGE_CONSUMER_GROUP%",
     cardinality="many",
 )
-def process_ai_usage(events: list[func.EventHubEvent]):
+def process_ai_usage(events: List[func.EventHubEvent]):
     run_usage_event_batch(events)
 
 
