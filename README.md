@@ -39,7 +39,7 @@ Read the [architecture description](docs/architecture.md) for the component deta
   resources, subscription-level role assignments, budgets, and managed exports.
 - Azure CLI with Bicep support.
 - Azure Developer CLI.
-- PowerShell 7.
+- PowerShell 7.2 or later.
 - Node.js 24.
 - Microsoft Foundry model access and quota in the selected Azure location.
 - Azure Marketplace permission and quota for the Hosted on Azure Version 2 `claude-opus-5` offer.

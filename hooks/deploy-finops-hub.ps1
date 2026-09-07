@@ -144,6 +144,8 @@ function Invoke-FinOpsDeployment {
 $repoRoot = Split-Path -Parent $PSScriptRoot
 . (Join-Path $PSScriptRoot 'budget-period.ps1')
 . (Join-Path $PSScriptRoot 'finops-script-cache.ps1')
+. (Join-Path $PSScriptRoot 'finops-template.ps1')
+. (Join-Path $PSScriptRoot 'finops-foundation.ps1')
 & (Join-Path $repoRoot 'scripts\verify-finops-release.ps1')
 
 $values = Get-AzdEnvironmentValues
@@ -273,10 +275,15 @@ try {
     if ($LASTEXITCODE -ne 0) {
         throw 'Could not compile the vendored FinOps hub wrapper.'
     }
+    Update-FinOpsUtcSchedules -TemplateFile $templateFile
 
-    Write-Host "Deploying FinOps hub foundation to $finOpsResourceGroupName..."
-    $foundationOutputs = Invoke-FinOpsDeployment $false 'finops-hub-foundation'
-    $dataFactoryPrincipalId = [string]$foundationOutputs.dataFactoryPrincipalId.value
+    $dataFactoryPrincipalId = Get-FinOpsDataFactoryPrincipalId -SubscriptionId $subscriptionId `
+        -ResourceGroupName $finOpsResourceGroupName -HubName $finOpsHubName
+    if (-not $dataFactoryPrincipalId) {
+        Write-Host "Deploying FinOps hub foundation to $finOpsResourceGroupName..."
+        $foundationOutputs = Invoke-FinOpsDeployment $false 'finops-hub-foundation'
+        $dataFactoryPrincipalId = [string]$foundationOutputs.dataFactoryPrincipalId.value
+    }
     if (-not $dataFactoryPrincipalId) {
         throw 'The FinOps hub deployment did not return its Data Factory principal ID.'
     }

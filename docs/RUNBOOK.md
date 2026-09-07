@@ -12,7 +12,7 @@ Do not add a virtual network only for this demo. Assess private networking, Prem
 
 - Azure CLI with Bicep CLI support.
 - Azure Developer CLI (`azd`).
-- PowerShell 7.
+- PowerShell 7.2 or later.
 - Node.js 24.
 - Rights to create two resource groups, resources, role assignments, policy
   assignments, budgets, and Cost Management exports.
@@ -133,10 +133,14 @@ The post-provision hook:
 - Grants the processor Cost Management Reader at subscription scope.
 - Generates or preserves the weather MCP key.
 
-The FinOps deployment uses two passes. The first pass deploys the hub without
+A new FinOps deployment uses two passes. The first pass deploys the hub without
 managed exports. The hook then grants Data Factory access. The second pass
 enables one daily month-to-date and one monthly previous-month FOCUS export.
 The hook rejects exports outside the exact main resource-group scope.
+
+On a retry or redeployment, the hook reads the existing hub-owned Data Factory
+identity and grants its required access before the managed-export pass.
+That pass updates the complete hub. It does not repeat the initial foundation pass.
 
 Before each pass, the hook clears completed trigger-management deployment-script
 records owned by this FinOps hub. The unchanged Microsoft scripts then stop and
@@ -144,6 +148,12 @@ restart Data Factory triggers instead of reusing a cached result.
 The hook retains running or failed script records for diagnosis and stops.
 This step does not delete Data Factory triggers, pipelines, storage, or billing data.
 The vendored Microsoft source remains unchanged.
+
+The hook also applies a narrow compatibility correction to the compiled template
+for [microsoft/finops-toolkit#2157](https://github.com/microsoft/finops-toolkit/issues/2157).
+It appends `Z` to schedule start times only when the resolved time zone is `UTC`.
+Mapped local-time schedules retain their original start times.
+The hook stops if the three expected upstream definitions change.
 
 The support resource group has a separate monthly budget. Its default amount is
 100 in the subscription billing currency. The support group is excluded from

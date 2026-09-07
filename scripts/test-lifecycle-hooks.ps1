@@ -51,6 +51,9 @@ function Test-PreprovisionContracts {
         $preprovision.Contains("'Microsoft.DataFactory/factories/write'")
     ) 'The preprovision hook must keep exact Data Factory permission checks.'
     Assert-True (
+        $preprovision.Contains("'Microsoft.DataFactory/factories/read'")
+    ) 'The preprovision hook must require access to read an existing hub identity.'
+    Assert-True (
         -not $preprovision.Contains("'Microsoft.DataFactory/factories/*'")
     ) 'The preprovision hook must not use wildcard Data Factory permission checks.'
     foreach ($action in @('read', 'write', 'delete')) {
@@ -453,6 +456,128 @@ function Test-FinOpsTriggerScriptCache {
     Write-Host 'Validated scoped FinOps trigger script cache handling.'
 }
 
+function Test-FinOpsUtcSchedules {
+    . (Join-Path $repositoryRoot 'hooks\finops-template.ps1')
+    $path = Join-Path $env:TEMP "aiobs-finops-template-$PID.json"
+    $definitions = @(
+        foreach ($start in @('2023-01-01T01:01:00', '2023-01-01T01:01:00', '2023-01-05T01:11:00')) {
+            @{
+                type = 'Microsoft.DataFactory/factories/triggers'
+                properties = @{
+                    type = 'ScheduleTrigger'
+                    typeProperties = @{
+                        recurrence = @{
+                            startTime = $start
+                            timeZone = "[reference('timeZones').outputs.Timezone.value]"
+                            interval = 1
+                        }
+                    }
+                }
+            }
+        }
+    )
+    $fixture = @{
+        resources = @{
+            nested = @{
+                type = 'Microsoft.Resources/deployments'
+                properties = @{ template = @{ resources = $definitions } }
+            }
+        }
+        metadata = @{ unchangedDate = '2024-02-03T04:05:06Z' }
+    }
+    $original = ConvertTo-Json -InputObject $fixture -Depth 20
+    try {
+        Set-Content -LiteralPath $path -Value $original -Encoding utf8NoBOM
+        Update-FinOpsUtcSchedules -TemplateFile $path
+        $updated = [System.Text.Json.Nodes.JsonNode]::Parse((Get-Content -LiteralPath $path -Raw))
+        $schedules = @(Get-FinOpsScheduleResource $updated)
+        foreach ($schedule in $schedules) {
+            $recurrence = $schedule['properties']['typeProperties']['recurrence']
+            $expression = $recurrence['startTime'].ToString()
+            Assert-True ($expression -cmatch "^\[if\(equals\(reference\('timeZones'\)\.outputs\.Timezone\.value, 'UTC'\), '(?<date>2023-01-0[15]T01:[01]1:00)Z', '\k<date>'\)\]$") 'Only UTC schedules may receive a Z suffix; mapped local-time schedules must retain their original value.'
+            Assert-True ($recurrence['timeZone'].ToString() -ceq "[reference('timeZones').outputs.Timezone.value]") 'The upstream time-zone lookup must remain unchanged.'
+            Assert-True ($recurrence['interval'].ToString() -ceq '1') 'Schedule intervals must remain unchanged.'
+        }
+        Assert-True ($updated['metadata']['unchangedDate'].ToString() -ceq '2024-02-03T04:05:06Z') 'Unrelated date strings must survive JSON serialization unchanged.'
+        $fixture.resources.nested.properties.template.resources = @($definitions[0])
+        $invalid = ConvertTo-Json -InputObject $fixture -Depth 20
+        Set-Content -LiteralPath $path -Value $invalid -Encoding utf8NoBOM
+        $before = Get-Content -LiteralPath $path -Raw
+        $failed = $false
+        try { Update-FinOpsUtcSchedules -TemplateFile $path } catch { $failed = $true }
+        Assert-True ($failed -and (Get-Content -LiteralPath $path -Raw) -ceq $before) 'A changed upstream schedule set must fail without writing the template.'
+    }
+    finally {
+        Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+    }
+    $hook = Get-Content -LiteralPath (Join-Path $repositoryRoot 'hooks\deploy-finops-hub.ps1') -Raw
+    Assert-True (
+        $hook.IndexOf('Update-FinOpsUtcSchedules -TemplateFile') -gt $hook.IndexOf('& $bicepExecutable build') -and
+        $hook.IndexOf('Update-FinOpsUtcSchedules -TemplateFile') -lt $hook.IndexOf('$foundationOutputs = Invoke-FinOpsDeployment')
+    ) 'Both deployment passes must use the corrected compiled template.'
+    Write-Host 'Validated conditional FinOps UTC schedules and template guards.'
+}
+
+function Test-FinOpsFoundationReuse {
+    . (Join-Path $repositoryRoot 'hooks\finops-foundation.ps1')
+    $subscriptionId = '00000000-0000-0000-0000-000000000001'
+    $principalId = '00000000-0000-0000-0000-000000000002'
+    $groupId = "/subscriptions/$subscriptionId/resourceGroups/rg-test-finops"
+    $factory = @{
+        name = 'test-factory'
+        id = "$groupId/providers/Microsoft.DataFactory/factories/test-factory"
+        tags = @{ 'cm-resource-parent' = "$groupId/providers/Microsoft.Cloud/hubs/test-hub" }
+        identity = @{ principalId = $principalId }
+    }
+    $arguments = @{ SubscriptionId = $subscriptionId; ResourceGroupName = 'rg-test-finops'; HubName = 'test-hub' }
+    $script:factoryResponse = @{ value = @($factory) }
+    $script:factoryExitCode = 0
+    $previousExitCode = Get-Variable -Name LASTEXITCODE -Scope Global -ErrorAction SilentlyContinue
+    $previousExitCodeValue = if ($null -ne $previousExitCode) { $previousExitCode.Value } else { $null }
+    function az {
+        Assert-True ($args[0] -eq 'rest' -and $args -contains 'GET') 'Foundation discovery must be read-only.'
+        $global:LASTEXITCODE = $script:factoryExitCode
+        ConvertTo-Json -InputObject $script:factoryResponse -Depth 10
+    }
+    try {
+        Assert-True ((Get-FinOpsDataFactoryPrincipalId @arguments) -ceq $principalId) 'Redeployment must reuse the existing hub-owned identity.'
+        $script:factoryResponse = @{ value = @() }
+        Assert-True ($null -eq (Get-FinOpsDataFactoryPrincipalId @arguments)) 'A new hub must request foundation provisioning.'
+        $foreign = $factory.Clone()
+        $foreign.tags = @{ 'cm-resource-parent' = 'other-hub' }
+        $script:factoryResponse = @{ value = @($foreign) }
+        Assert-True ($null -eq (Get-FinOpsDataFactoryPrincipalId @arguments)) 'A foreign Data Factory must not supply the hub identity.'
+        $invalidIdentity = $factory.Clone()
+        $invalidIdentity.identity = @{ principalId = 'invalid' }
+        foreach ($response in @(
+            @{ value = @($factory, $factory) }
+            @{ value = @($invalidIdentity) }
+            @{ value = @(); nextLink = 'https://management.azure.com/next' }
+            @{}
+        )) {
+            $script:factoryResponse = $response
+            $failed = $false
+            try { Get-FinOpsDataFactoryPrincipalId @arguments | Out-Null } catch { $failed = $true }
+            Assert-True $failed 'Ambiguous, malformed, or incomplete foundation discovery must stop deployment.'
+        }
+        $script:factoryExitCode = 1
+        $script:factoryResponse = @{ value = @() }
+        $failed = $false
+        try { Get-FinOpsDataFactoryPrincipalId @arguments | Out-Null } catch { $failed = $true }
+        Assert-True $failed 'An Azure lookup failure must not be treated as a missing foundation.'
+    }
+    finally {
+        if ($null -ne $previousExitCode) {
+            Set-Variable -Name LASTEXITCODE -Scope Global -Value $previousExitCodeValue
+        }
+        else {
+            Remove-Variable -Name LASTEXITCODE -Scope Global -ErrorAction SilentlyContinue
+        }
+        Remove-Variable -Name factoryResponse, factoryExitCode -Scope Script
+    }
+    Write-Host 'Validated existing FinOps foundation discovery.'
+}
+
 function Test-LocalAzdContracts {
     $predown = Get-Content -LiteralPath (Join-Path $repositoryRoot 'hooks\predown.ps1') -Raw
     $postdown = Get-Content -LiteralPath (Join-Path $repositoryRoot 'hooks\postdown.ps1') -Raw
@@ -500,6 +625,8 @@ try {
         'hooks\preprovision.ps1'
         'hooks\budget-period.ps1'
         'hooks\finops-script-cache.ps1'
+        'hooks\finops-template.ps1'
+        'hooks\finops-foundation.ps1'
         'hooks\deploy-finops-hub.ps1'
         'hooks\postprovision.ps1'
         'hooks\predown.ps1'
@@ -509,6 +636,8 @@ try {
     Test-PreprovisionContracts
     Test-BudgetPreservationContracts
     Test-FinOpsTriggerScriptCache
+    Test-FinOpsUtcSchedules
+    Test-FinOpsFoundationReuse
     Test-EntraCleanupContracts
     Test-TeardownInheritedApprovalRegression
     Test-PostprovisionAuthContracts
