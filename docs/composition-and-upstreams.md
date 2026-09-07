@@ -60,11 +60,54 @@ Local paths are repository-relative. Permalinks pin a commit or release tag.
 | Event Hubs namespace | `infra/modules/usage-event-stream.bicep` | Azure/bicep-registry-modules AVM `avm/res/event-hub/namespace` [0.15.0](https://github.com/Azure/bicep-registry-modules/tree/avm/res/event-hub/namespace/0.15.0/avm/res/event-hub/namespace) | Pinned AVM module | Use a supported, versioned module for the Event Hubs namespace with Capture. | Module features not enabled for this demo, for example private endpoints. | `usage-event-stream.bicep` reference `br/public:avm/res/event-hub/namespace:0.15.0`; AVM tag SHA `4f750c70f333b2df6170e3b56ae90faa852361d2` |
 | Claude on Foundry deployment shape | `infra/modules/foundry.bicep` | Azure-Samples/claude, [`infra-bicep/infra/foundry.bicep`](https://github.com/Azure-Samples/claude/blob/8b3ded4691e48b5c28d43dbbbee6cb4868936ff3/infra-bicep/infra/foundry.bicep) | Adapted sample | Follow the Microsoft-maintained Marketplace deployment shape for Claude Opus on Foundry. | The sample also ships Sonnet and Terraform variants. This demo deploys only Claude Opus with Bicep. | `foundry.bicep` comment and resource block (`format: 'Anthropic'`, `organizationName`, `countryCode`, `industry`, `deployments@2025-10-01-preview`) |
 | APIM GenAI gateway policies | `apim-policies/*.xml` | Microsoft Learn GenAI gateway policies: [`llm-emit-token-metric`](https://learn.microsoft.com/azure/api-management/llm-emit-token-metric-policy), [`llm-content-safety`](https://learn.microsoft.com/azure/api-management/llm-content-safety-policy), [`log-to-eventhub`](https://learn.microsoft.com/azure/api-management/log-to-eventhub-policy) | SDK or platform feature | Use the documented API Management policies for token metrics, content safety, and Event Hubs logging. | Not applicable. | `apim-policies/README.md`; policy XML files |
+| Azure Monitor dashboards with Grafana | `infra/dashboards/grafana-dashboard.json`; `infra/modules/grafana-dashboard.bicep` | Grafana Azure Monitor query schema and [built-in Key Vault dashboard at commit `e7cd4e6`](https://github.com/grafana/grafana/blob/e7cd4e6259fbd97b5288f40f70e36aefee6b01d9/public/app/plugins/datasource/azuremonitor/dashboards/keyvault.json) | Adapted sample | Use the upstream target layout, then constrain it for the Azure portal-hosted Grafana runtime. | The local metric target keeps `subscription` at target level and limits each `resources` entry to `resourceGroup` and `resourceName`. It also retains `metricDefinition` beside `metricNamespace`. See the compatibility deviation below. | `scripts/test-token-cost-attribution.ps1`; [compatibility fix `400cd7a`](https://github.com/gjlumsden/ai-observability-demo/commit/400cd7a); live Azure metric queries |
 | Application telemetry | `src/web/` (`@azure/monitor-opentelemetry` 1.19.0) | [Azure Monitor OpenTelemetry Distro](https://learn.microsoft.com/azure/azure-monitor/app/opentelemetry-enable) | SDK or platform feature | Auto-instrument the web app for Application Insights. | Not applicable. | `src/web/package.json`; `src/web/README.md` |
 | Web server, templates, and UI | `src/web/app.js`, `src/web/views/`, `src/web/scripts/copy-govuk-assets.js` | [Express](https://github.com/expressjs/express), [Nunjucks](https://github.com/mozilla/nunjucks), [GOV.UK Frontend](https://github.com/alphagov/govuk-frontend) | Published third-party package | Provide routing, server-rendered pages, and UI components without implementing those functions in this repository. GOV.UK assets are copied during the web build. | The project does not reproduce the GOV.UK service or claim a Microsoft UI reference implementation. | `src/web/package.json`; `src/web/package-lock.json`; upstream code and asset licences |
 | Interactive sign-in | `src/web/` (Azure App Service Authentication / Easy Auth) | Azure App Service Authentication platform feature | SDK or platform feature | Validate the token signature, issuer, audience, and lifetime at the platform edge with `WEBSITE_AAD_ENABLE_MISE=true`. The app reads identity from `X-MS-CLIENT-PRINCIPAL-*` and `X-MS-TOKEN-AAD-*` headers. This is the Microsoft-approved MISE-compliant path for Node on App Service. | Application-managed MSAL library and Express session, removed. | `infra/modules/app-service.bicep`; `src/web/middleware/auth.js`; `src/web/README.md` |
 | Usage processor | `src/usage-processor/` | Azure SDKs: `azure-eventhub`, `azure-monitor-ingestion`, `azure-monitor-query`, `azure-mgmt-costmanagement`, `azure-identity`, `azure-storage-blob`, `azure-data-tables`, `azure-functions` | Original repository extension | Read Event Hubs events and allocate FOCUS cost. Microsoft FinOps FOCUS normalizes the authoritative billing data and the Logs Ingestion API appends rows. Neither provides the pseudonymous team or user allocation or the atomic multi-batch publication. The processor adds those with a stable `RecordId`, a `run-complete` marker, and `ExpectedRecordCount`. | Not applicable. | `src/usage-processor/usage_processor/allocation.py`; `src/usage-processor/schemas/ai-cost-allocation.v1.json`; `src/usage-processor/requirements.txt` |
 | Project inspiration | Overall project | lestermarch/core-ai-platform-demo, [commit `3724a54`](https://github.com/lestermarch/core-ai-platform-demo/tree/3724a540e22740006eddbff5055e52046a2b1719) | Community inspiration | A community repository provided early inspiration for a Foundry-centred `azd` and Bicep project. This project does not claim file-level reuse of its content without evidence. The Microsoft original repositories and platform features are the authoritative references. | The community repository uses AI Search and Cosmos DB agents. This project uses different scenarios. | `README.md` acknowledgements |
+
+## Grafana metric-query compatibility deviation
+
+The upstream Grafana Azure Monitor query model is authoritative. This repository
+uses its target-level `subscription` field and its `resources` collection.
+
+The Azure portal-hosted Grafana runtime did not accept every field allowed by the
+newer upstream `AzureMonitorResource` type. When `subscription`, `region`, and
+`metricNamespace` were also present inside a resource entry, the runtime built an
+invalid Azure resource path. It treated the literal `resourceGroups` path segment
+as a subscription identifier and returned `InvalidSubscriptionId`.
+
+The repository therefore uses this constrained compatibility shape for Azure
+Monitor metric targets:
+
+```json
+{
+  "subscription": "<subscription-guid>",
+  "azureMonitor": {
+    "resources": [
+      {
+        "resourceGroup": "<resource-group>",
+        "resourceName": "<resource-name>"
+      }
+    ],
+    "metricDefinition": "<resource-type>",
+    "metricNamespace": "<resource-type>"
+  }
+}
+```
+
+This is a deliberate compatibility deviation from the full generated resource
+type. It does not change the metric name, aggregation, resource scope, or Azure
+subscription. The constrained resource entry is the confirmed correction for the
+observed error. The repository also retains `metricDefinition` beside
+`metricNamespace` as a compatibility guard for portal-hosted Grafana versions.
+That duplicate field was not identified as the direct cause of the error.
+
+`scripts/test-token-cost-attribution.ps1` enforces the constrained shape. Direct
+Azure Monitor queries verify all six metrics after deployment. Remove this
+compatibility shape only after a live portal-hosted dashboard test proves that the
+runtime accepts the newer upstream representation without `InvalidSubscriptionId`.
 
 ## Microsoft SDK and package sources
 

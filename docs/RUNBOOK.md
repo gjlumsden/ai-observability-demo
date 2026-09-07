@@ -489,6 +489,20 @@ Use the **AI Usage and Cost Investigation** Workbook for raw request and
 allocation ledgers, exceptions, evidence, latest-run reconciliation, and Claude
 external-context drill-downs.
 
+If a metric panel reports `InvalidSubscriptionId` and names `resourceGroups` as
+the invalid identifier, inspect the serialized target before changing Azure RBAC.
+The portal-hosted Grafana runtime requires the compatibility shape documented in
+[Composition and upstreams](composition-and-upstreams.md#grafana-metric-query-compatibility-deviation):
+
+- Put `subscription` on the target.
+- Limit each metric `resources` entry to `resourceGroup` and `resourceName`.
+- Keep `metricDefinition` and `metricNamespace` at the `azureMonitor` level.
+- Do not put `subscription`, `region`, or `metricNamespace` inside a resource entry.
+
+This shape intentionally constrains the newer upstream resource type. The
+regression test in `scripts/test-token-cost-attribution.ps1` prevents accidental
+removal before the hosted runtime supports the full upstream representation.
+
 If cost panels are empty:
 
 1. Confirm both managed exports are active at the main resource-group scope.
