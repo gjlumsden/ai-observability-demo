@@ -1,6 +1,12 @@
+[CmdletBinding()]
+param(
+    [ValidateSet('All', 'Authentication')][string] $Stage = 'All'
+)
+
 $ErrorActionPreference = 'Stop'
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
+. (Join-Path $PSScriptRoot 'app-auth.ps1')
 
 function Get-AzdEnvironmentValues {
     $values = @{}
@@ -35,14 +41,15 @@ function Get-RequiredValue {
 function Invoke-AzJson {
     param(
         [Parameter(Mandatory = $true)][string] $Area,
-        [Parameter(Mandatory = $true)][string[]] $Arguments
+        [Parameter(Mandatory = $true)][string[]] $Arguments,
+        [switch] $AsHashtable
     )
 
     $output = & az @Arguments 2>&1
     if ($LASTEXITCODE -ne 0) {
         throw "${Area}: $($output -join "`n")"
     }
-    return ($output -join "`n" | ConvertFrom-Json)
+    return ($output -join "`n" | ConvertFrom-Json -AsHashtable:$AsHashtable)
 }
 
 function Invoke-Az {
@@ -93,6 +100,8 @@ function Get-OptionalEntraApplicationByClientId {
 }
 
 $values = Get-AzdEnvironmentValues
+$subscriptionId = Get-RequiredValue $values 'AZURE_SUBSCRIPTION_ID'
+Invoke-Az 'Azure subscription selection' @('account', 'set', '--subscription', $subscriptionId, '--only-show-errors')
 $resourceGroup = Get-RequiredValue $values 'AZURE_RESOURCE_GROUP'
 $tenantId = Get-RequiredValue $values 'AZURE_TENANT_ID'
 $entraLoginEndpoint = Invoke-AzText 'Azure cloud Active Directory endpoint' @(
@@ -135,8 +144,13 @@ if ($bootstrapRoleExitCode -ne 0 -and ($bootstrapRoleOutput -join "`n") -notmatc
     }
 }
 
-& (Join-Path $PSScriptRoot 'deploy-finops-hub.ps1')
-$values = Get-AzdEnvironmentValues
+if ($Stage -eq 'All') {
+    & (Join-Path $PSScriptRoot 'deploy-finops-hub.ps1')
+    $values = Get-AzdEnvironmentValues
+}
+else {
+    Write-Host 'Authentication-only stage: existing FinOps provisioning is unchanged.'
+}
 
 Write-Host ''
 Write-Host 'Configuring App Service authentication' -ForegroundColor Cyan
@@ -287,29 +301,31 @@ Invoke-Az 'Web app obsolete app settings cleanup' @(
     '--output', 'none'
 )
 
-# Reapply Easy Auth on every postprovision run because infra\main.bicep provisions the
-# app-service module with a placeholder empty Entra client ID before this hook repairs it.
-Invoke-Az 'Web app Easy Auth provider' @(
-    'webapp', 'auth', 'update',
-    '--only-show-errors',
-    '--resource-group', $resourceGroup,
-    '--name', $webAppName,
-    '--enabled', 'true',
-    '--unauthenticated-client-action', 'AllowAnonymous',
-    '--enable-token-store', 'true',
-    '--set',
-    'identityProviders.azureActiveDirectory.enabled=true',
-    "identityProviders.azureActiveDirectory.registration.clientId=$($app.appId)",
-    'identityProviders.azureActiveDirectory.registration.clientSecretSettingName=MICROSOFT_PROVIDER_AUTHENTICATION_SECRET',
-    "identityProviders.azureActiveDirectory.registration.openIdIssuer=$entraIssuer",
-    "identityProviders.azureActiveDirectory.login.loginParameters[0]=scope=openid profile email offline_access $scopeUri",
-    # allowedAudiences restricts accepted aud claims for this API. allowedApplications
-    # restricts which client application IDs may call it.
-    "identityProviders.azureActiveDirectory.validation.allowedAudiences[0]=$($app.appId)",
-    "identityProviders.azureActiveDirectory.validation.allowedAudiences[1]=$apiApplicationIdUri",
-    "identityProviders.azureActiveDirectory.validation.defaultAuthorizationPolicy.allowedApplications[0]=$($app.appId)",
-    '--output', 'none'
-)
+# Update the provider atomically through ARM; authV2 CLI extensions accept only one --set field.
+$groupSegment = [Uri]::EscapeDataString($resourceGroup)
+$appSegment = [Uri]::EscapeDataString($webAppName)
+$authResourceUri = "https://management.azure.com/subscriptions/$subscriptionId/resourceGroups/$groupSegment/providers/Microsoft.Web/sites/$appSegment/config/authsettingsV2"
+$currentAuth = Invoke-AzJson 'Web app Easy Auth settings lookup' @(
+    'rest', '--method', 'GET',
+    '--uri', "$authResourceUri/list?api-version=2024-04-01",
+    '--only-show-errors', '--output', 'json'
+) -AsHashtable
+$authProperties = Set-AppServiceAuthProperties -CurrentProperties $currentAuth['properties'] `
+    -ClientId $app.appId -Issuer $entraIssuer -ScopeUri $scopeUri
+$authFile = Join-Path $workingDirectory "postprovision-auth-$PID.json"
+try {
+    @{ properties = $authProperties } | ConvertTo-Json -Depth 30 |
+        Set-Content -LiteralPath $authFile -Encoding utf8NoBOM
+    Invoke-Az 'Web app Easy Auth provider' @(
+        'rest', '--method', 'PUT',
+        '--uri', "${authResourceUri}?api-version=2024-04-01",
+        '--body', "@$authFile",
+        '--only-show-errors', '--output', 'none'
+    )
+}
+finally {
+    Remove-Item -LiteralPath $authFile -Force -ErrorAction SilentlyContinue
+}
 
 Invoke-Az 'APIM Entra audience' @(
     'apim', 'nv', 'update',
@@ -339,8 +355,10 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Host ''
-Write-Host 'AI Observability Demo post-provision configuration completed.' -ForegroundColor Green
+Write-Host "AI Observability Demo post-provision stage '$Stage' completed." -ForegroundColor Green
 Write-Host "Web app:      $webAppUrl"
 Write-Host "Model compare: $webAppUrl/model-comparison"
 Write-Host "Code explain:  $webAppUrl/scientific-code-explainer"
-Write-Host "FinOps hub:     $finOpsHubName (managed exports enabled)"
+if ($Stage -eq 'All') {
+    Write-Host "FinOps hub:     $finOpsHubName (managed exports enabled)"
+}

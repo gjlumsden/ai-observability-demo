@@ -202,6 +202,20 @@ Confirm the Entra application has:
 
 The demo hook creates a 30-day client credential to comply with restrictive tenant credential lifetime policies.
 
+The hook updates `authsettingsV2` in one ARM request. It preserves unrelated
+authentication settings and reapplies the Entra issuer, client ID, audiences,
+calling-client restriction, token store, and HTTPS requirement.
+It does not depend on the installed Azure CLI `authV2` extension.
+
+After FinOps configuration succeeds, resume a failed authentication step without
+redeploying FinOps:
+
+```powershell
+pwsh -NoProfile -File .\hooks\postprovision.ps1 -Stage Authentication
+```
+
+The default `All` stage still runs the complete post-provision workflow.
+
 Confirm APIM rejects:
 
 - A missing presenter token.

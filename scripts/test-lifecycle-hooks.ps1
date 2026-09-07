@@ -202,6 +202,7 @@ exit /b 1
 }
 function Test-PostprovisionAuthContracts {
     $postprovision = Get-Content -LiteralPath (Join-Path $repositoryRoot 'hooks\postprovision.ps1') -Raw
+    . (Join-Path $repositoryRoot 'hooks\app-auth.ps1')
 
     Assert-True (
         $postprovision.Contains('$webAppUrl/.auth/login/aad/callback') -and
@@ -215,28 +216,55 @@ function Test-PostprovisionAuthContracts {
         $postprovision.Contains('$entraIssuer = ''{0}/{1}/v2.0'' -f $entraLoginEndpoint.TrimEnd(''/''), $tenantId')
     ) 'The postprovision hook must derive the OpenID issuer from the active Azure cloud.'
     Assert-True (
-        $postprovision.Contains("'webapp', 'auth', 'update'")
-    ) 'The postprovision hook must finalize Easy Auth with az webapp auth update.'
+        $postprovision.Contains('config/authsettingsV2') -and
+        $postprovision.Contains("'rest', '--method', 'PUT'") -and
+        $postprovision.Contains('Set-AppServiceAuthProperties -CurrentProperties')
+    ) 'The postprovision hook must update Easy Auth atomically through ARM.'
+    Assert-True (
+        $postprovision.Contains("[ValidateSet('All', 'Authentication')][string] `$Stage = 'All'") -and
+        $postprovision.Replace("`r", '').Contains("if (`$Stage -eq 'All') {`n    & (Join-Path `$PSScriptRoot 'deploy-finops-hub.ps1')")
+    ) 'The default stage must include FinOps; authentication-only resumption must be explicit.'
 
     $credentialResetIndex = $postprovision.IndexOf('$credential = Invoke-AzJson ''Entra app credential'' @(')
     $authUpdateIndex = $postprovision.IndexOf('Invoke-Az ''Web app Easy Auth provider'' @(')
     Assert-True (
         $credentialResetIndex -ge 0 -and $authUpdateIndex -gt $credentialResetIndex
     ) 'The postprovision hook must reapply Easy Auth after registration handling on every postprovision run.'
-    foreach ($setting in @(
-        'identityProviders.azureActiveDirectory.enabled=true'
-        'identityProviders.azureActiveDirectory.registration.clientId=$($app.appId)'
-        'identityProviders.azureActiveDirectory.registration.clientSecretSettingName=MICROSOFT_PROVIDER_AUTHENTICATION_SECRET'
-        'identityProviders.azureActiveDirectory.registration.openIdIssuer=$entraIssuer'
-        'identityProviders.azureActiveDirectory.login.loginParameters[0]=scope=openid profile email offline_access $scopeUri'
-        'identityProviders.azureActiveDirectory.validation.allowedAudiences[0]=$($app.appId)'
-        'identityProviders.azureActiveDirectory.validation.allowedAudiences[1]=$apiApplicationIdUri'
-        'identityProviders.azureActiveDirectory.validation.defaultAuthorizationPolicy.allowedApplications[0]=$($app.appId)'
-    )) {
-        Assert-True (
-            $postprovision.Contains($setting)
-        ) "The postprovision hook must set $setting in the Easy Auth provider update."
+    $id = '00000000-0000-0000-0000-000000000001'
+    $issuer = 'https://login.microsoftonline.com/00000000-0000-0000-0000-000000000002/v2.0'
+    $properties = @{
+        platform = @{ enabled = $false; runtimeVersion = '~1' }
+        globalValidation = @{ requireAuthentication = $false }
+        login = @{ tokenStore = @{ enabled = $false }; preserveUrlFragmentsForLogins = $true }
+        identityProviders = @{
+            azureActiveDirectory = @{
+                enabled = $false
+                validation = @{
+                    defaultAuthorizationPolicy = @{ allowedPrincipals = @{ groups = @('existing-group') } }
+                }
+            }
+            customProvider = @{ enabled = $false }
+        }
+        httpSettings = @{ forwardProxy = @{ convention = 'Standard' } }
     }
+    $configured = Set-AppServiceAuthProperties -CurrentProperties $properties -ClientId $id -Issuer $issuer -ScopeUri "api://$id/access_as_user"
+    $aad = $configured.identityProviders.azureActiveDirectory
+    Assert-True ($configured.platform.enabled -and $aad.enabled -and $configured.login.tokenStore.enabled) 'Easy Auth, the Entra provider, and the token store must be enabled.'
+    Assert-True ($aad.registration.clientId -ceq $id -and $aad.registration.openIdIssuer -ceq $issuer) 'The actual Entra client ID and HTTPS issuer must be applied.'
+    Assert-True ($aad.registration.clientSecretSettingName -ceq 'MICROSOFT_PROVIDER_AUTHENTICATION_SECRET') 'The provider must reference the existing secret setting without embedding a credential.'
+    Assert-True ($aad.login.loginParameters[0] -ceq "scope=openid profile email offline_access api://$id/access_as_user") 'The provider must request the delegated API scope.'
+    Assert-True (@($aad.validation.allowedAudiences).Count -eq 2 -and $aad.validation.allowedAudiences[0] -ceq $id -and $aad.validation.allowedAudiences[1] -ceq "api://$id") 'Both supported API audiences must remain explicit.'
+    Assert-True (@($aad.validation.defaultAuthorizationPolicy.allowedApplications).Count -eq 1 -and $aad.validation.defaultAuthorizationPolicy.allowedApplications[0] -ceq $id) 'The calling-client restriction must remain explicit.'
+    Assert-True ($aad.validation.defaultAuthorizationPolicy.allowedPrincipals.groups[0] -ceq 'existing-group') 'Existing Entra principal restrictions must not be removed.'
+    Assert-True ($configured.httpSettings.requireHttps -and $configured.httpSettings.forwardProxy.convention -ceq 'Standard') 'HTTPS must be required without losing the existing proxy configuration.'
+    Assert-True ($configured.platform.runtimeVersion -ceq '~1' -and $configured.login.preserveUrlFragmentsForLogins -and $configured.identityProviders.ContainsKey('customProvider')) 'Unrelated platform, login, and provider settings must be preserved.'
+    Assert-True (-not $configured.globalValidation.requireAuthentication -and $configured.globalValidation.unauthenticatedClientAction -ceq 'AllowAnonymous') 'The public health route and application-enforced route authorization must remain supported.'
+    $failed = $false
+    try { Set-AppServiceAuthProperties -CurrentProperties @{} -ClientId $id -Issuer $issuer -ScopeUri "api://$id/access_as_user" | Out-Null } catch { $failed = $true }
+    Assert-True $failed 'Malformed current authentication settings must stop the update.'
+    $failed = $false
+    try { Set-AppServiceAuthProperties -CurrentProperties $properties -ClientId $id -Issuer 'http://example.invalid' -ScopeUri "api://$id/access_as_user" | Out-Null } catch { $failed = $true }
+    Assert-True $failed 'An insecure issuer must be rejected before updating authentication.'
     Assert-True (
         $postprovision.Contains('MICROSOFT_PROVIDER_AUTHENTICATION_SECRET=$($credential.password)')
     ) 'The postprovision hook must store the Easy Auth client secret in MICROSOFT_PROVIDER_AUTHENTICATION_SECRET.'
@@ -251,13 +279,6 @@ function Test-PostprovisionAuthContracts {
         -not $postprovision.Contains('ENTRA_SCOPES=api://$($app.appId)/$scopeValue') -and
         -not $postprovision.Contains('SESSION_SECRET=$sessionSecret')
     ) 'The postprovision hook must not keep obsolete MSAL/session app settings.'
-    Assert-True (
-        $postprovision.Contains('identityProviders.azureActiveDirectory.validation.allowedAudiences[0]=$($app.appId)') -and
-        $postprovision.Contains('identityProviders.azureActiveDirectory.validation.allowedAudiences[1]=$apiApplicationIdUri')
-    ) 'The postprovision hook must validate token audiences explicitly with both the API client ID and App ID URI.'
-    Assert-True (
-        $postprovision.Contains('identityProviders.azureActiveDirectory.validation.defaultAuthorizationPolicy.allowedApplications[0]=$($app.appId)')
-    ) 'The postprovision hook must restrict allowedApplications to the configured client application identity explicitly.'
     Assert-True (
         $postprovision.Contains('api = @{') -and
         $postprovision.Contains('requestedAccessTokenVersion = 2')
@@ -706,6 +727,7 @@ try {
         'hooks\finops-foundation.ps1'
         'hooks\deploy-finops-hub.ps1'
         'hooks\postprovision.ps1'
+        'hooks\app-auth.ps1'
         'hooks\predown.ps1'
         'hooks\postdown.ps1'
         'demo-scripts\teardown.ps1'
