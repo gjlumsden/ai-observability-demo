@@ -571,6 +571,60 @@ function Test-FinOpsUtcSchedules {
     Write-Host 'Validated conditional FinOps UTC schedules and template guards.'
 }
 
+function Test-FinOpsExportRetries {
+    . (Join-Path $repositoryRoot 'hooks\finops-template.ps1')
+    $path = Join-Path $env:TEMP "aiobs-finops-export-retry-$PID.json"
+    $fixture = @{
+        resources = @(
+            @{
+                name = 'pipeline'
+                properties = @{
+                    activities = @(
+                        @{
+                            name = 'Trigger export'
+                            type = 'WebActivity'
+                            policy = @{
+                                timeout = '0.00:05:00'
+                                retry = 0
+                                retryIntervalInSeconds = 30
+                                secureOutput = $false
+                                secureInput = $false
+                            }
+                        }
+                    )
+                }
+            }
+        )
+    }
+    try {
+        Set-Content -LiteralPath $path -Value ($fixture | ConvertTo-Json -Depth 20) -Encoding utf8NoBOM
+        Update-FinOpsExportRetries -TemplateFile $path
+        $updated = [System.Text.Json.Nodes.JsonNode]::Parse((Get-Content -LiteralPath $path -Raw))
+        $activities = @(Get-FinOpsNamedActivity -Node $updated -Name 'Trigger export' -Type 'WebActivity')
+        $policy = $activities[0]['policy']
+        Assert-True ($policy['retry'].ToString() -ceq '3') 'The export trigger must retry three times.'
+        Assert-True ($policy['retryIntervalInSeconds'].ToString() -ceq '60') 'The export trigger must wait 60 seconds between retries.'
+        Assert-True ($policy['timeout'].ToString() -ceq '0.00:05:00') 'The export trigger timeout must remain unchanged.'
+
+        $fixture.resources[0].properties.activities[0].policy.retry = 1
+        Set-Content -LiteralPath $path -Value ($fixture | ConvertTo-Json -Depth 20) -Encoding utf8NoBOM
+        $before = Get-Content -LiteralPath $path -Raw
+        $failed = $false
+        try { Update-FinOpsExportRetries -TemplateFile $path } catch { $failed = $true }
+        Assert-True ($failed -and (Get-Content -LiteralPath $path -Raw) -ceq $before) 'A changed upstream retry policy must fail without writing the template.'
+    }
+    finally {
+        Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+    }
+
+    $hook = Get-Content -LiteralPath (Join-Path $repositoryRoot 'hooks\deploy-finops-hub.ps1') -Raw
+    Assert-True (
+        $hook.IndexOf('Update-FinOpsExportRetries -TemplateFile') -gt $hook.IndexOf('& $bicepExecutable build') -and
+        $hook.IndexOf('Update-FinOpsExportRetries -TemplateFile') -lt $hook.IndexOf('$foundationOutputs = Invoke-FinOpsDeployment')
+    ) 'Both FinOps deployment passes must use the bounded export retry correction.'
+    Write-Host 'Validated bounded FinOps export retries and template guards.'
+}
+
 function Test-FinOpsFoundationReuse {
     . (Join-Path $repositoryRoot 'hooks\finops-foundation.ps1')
     $subscriptionId = '00000000-0000-0000-0000-000000000001'
@@ -902,6 +956,7 @@ try {
     Test-BudgetPreservationContracts
     Test-FinOpsTriggerScriptCache
     Test-FinOpsUtcSchedules
+    Test-FinOpsExportRetries
     Test-FinOpsFoundationReuse
     Test-FinOpsExportConfiguration
     Test-EntraCleanupContracts

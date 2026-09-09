@@ -164,11 +164,15 @@ The hook retains running or failed script records for diagnosis and stops.
 This step does not delete Data Factory triggers, pipelines, storage, or billing data.
 The vendored Microsoft source remains unchanged.
 
-The hook also applies a narrow compatibility correction to the compiled template
-for [microsoft/finops-toolkit#2157](https://github.com/microsoft/finops-toolkit/issues/2157).
-It appends `Z` to schedule start times only when the resolved time zone is `UTC`.
+The hook also applies narrow compatibility corrections to the compiled template.
+For [microsoft/finops-toolkit#2157](https://github.com/microsoft/finops-toolkit/issues/2157),
+it appends `Z` to schedule start times only when the resolved time zone is `UTC`.
 Mapped local-time schedules retain their original start times.
-The hook stops if the three expected upstream definitions change.
+
+The compiled `Trigger export` Web Activity also uses three retries at 60-second
+intervals. This handles the observed Cost Management HTTP 429 response, which
+required a 60-second delay. The vendored Microsoft source remains unchanged.
+The hook stops if either expected upstream definition changes.
 
 The support resource group has a separate monthly budget. Its default amount is
 100 in the subscription billing currency. The support group is excluded from

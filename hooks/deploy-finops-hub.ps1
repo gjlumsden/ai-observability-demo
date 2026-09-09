@@ -276,6 +276,7 @@ try {
         throw 'Could not compile the vendored FinOps hub wrapper.'
     }
     Update-FinOpsUtcSchedules -TemplateFile $templateFile
+    Update-FinOpsExportRetries -TemplateFile $templateFile
 
     $dataFactoryPrincipalId = Get-FinOpsDataFactoryPrincipalId -SubscriptionId $subscriptionId `
         -ResourceGroupName $finOpsResourceGroupName -HubName $finOpsHubName

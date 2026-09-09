@@ -20,6 +20,29 @@ function Get-FinOpsScheduleResource {
     }
 }
 
+function Get-FinOpsNamedActivity {
+    param(
+        [System.Text.Json.Nodes.JsonNode] $Node,
+        [Parameter(Mandatory = $true)][string] $Name,
+        [Parameter(Mandatory = $true)][string] $Type
+    )
+
+    if ($Node -is [System.Text.Json.Nodes.JsonObject]) {
+        if ($null -ne $Node['name'] -and $null -ne $Node['type'] -and
+            $Node['name'].ToString() -ceq $Name -and $Node['type'].ToString() -ceq $Type) {
+            Write-Output -NoEnumerate $Node
+        }
+        foreach ($entry in $Node) {
+            Get-FinOpsNamedActivity -Node $entry.Value -Name $Name -Type $Type
+        }
+    }
+    elseif ($Node -is [System.Text.Json.Nodes.JsonArray]) {
+        foreach ($item in $Node) {
+            Get-FinOpsNamedActivity -Node $item -Name $Name -Type $Type
+        }
+    }
+}
+
 function Update-FinOpsUtcSchedules {
     [CmdletBinding()]
     param([Parameter(Mandatory = $true)][string] $TemplateFile)
@@ -60,4 +83,42 @@ function Update-FinOpsUtcSchedules {
     $options.MaxDepth = 100
     [System.IO.File]::WriteAllText($TemplateFile, $template.ToJsonString($options), [System.Text.UTF8Encoding]::new($false))
     Write-Host 'Applied the conditional UTC start-time correction to three compiled FinOps schedule definitions.'
+}
+
+function Update-FinOpsExportRetries {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)][string] $TemplateFile)
+
+    $documentOptions = [System.Text.Json.JsonDocumentOptions]::new()
+    $documentOptions.MaxDepth = 100
+    $template = [System.Text.Json.Nodes.JsonNode]::Parse(
+        (Get-Content -LiteralPath $TemplateFile -Raw), $null, $documentOptions
+    )
+    $activities = @(
+        Get-FinOpsNamedActivity -Node $template -Name 'Trigger export' -Type 'WebActivity'
+    )
+    if ($activities.Count -ne 1) {
+        throw 'Expected exactly one Trigger export WebActivity in the pinned FinOps v14 template.'
+    }
+
+    $policy = $activities[0]['policy']
+    if ($null -eq $policy -or
+        $policy['timeout'].ToString() -cne '0.00:05:00' -or
+        $policy['retry'].ToString() -cne '0' -or
+        $policy['retryIntervalInSeconds'].ToString() -cne '30') {
+        throw 'The FinOps v14 Trigger export retry policy changed. Review the 429 compatibility correction.'
+    }
+
+    $policy['retry'] = 3
+    $policy['retryIntervalInSeconds'] = 60
+
+    $options = [System.Text.Json.JsonSerializerOptions]::new()
+    $options.WriteIndented = $true
+    $options.MaxDepth = 100
+    [System.IO.File]::WriteAllText(
+        $TemplateFile,
+        $template.ToJsonString($options),
+        [System.Text.UTF8Encoding]::new($false)
+    )
+    Write-Host 'Applied bounded 60-second retries to the compiled FinOps export trigger.'
 }
