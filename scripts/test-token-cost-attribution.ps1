@@ -259,6 +259,9 @@ function Test-DashboardContracts {
     Assert-True (
         $dashboardText.Contains('ReconciliationResidual = sum(Residual) by TimeGenerated = bin(ChargePeriodStart, 1d)')
     ) 'The reconciliation residual query does not return a Grafana time axis.'
+    Assert-True (
+        $dashboardText.Contains('case(TokenQuality in (\"missing\", \"interrupted\", \"unavailable\"), strcat(\"token quality: \", TokenQuality), isempty(RateCardVersionId)')
+    ) 'The dashboard must report missing token evidence before it reports a missing rate.'
 
     $dashboardModulePath = Join-Path $repositoryRoot 'infra\modules\grafana-dashboard.bicep'
     $dashboardModule = Get-Content -LiteralPath $dashboardModulePath -Raw
@@ -295,6 +298,9 @@ function Test-WorkbookContracts {
         $workbookText.Contains('UsageProcessorCheckpointStatus') -and
         $workbookText.Contains('checkpointAgeSeconds')
     ) 'The investigation workbook does not expose checkpoint telemetry.'
+    Assert-True (
+        $workbookText.Contains("case(TokenQuality in ('missing', 'interrupted', 'unavailable'), strcat('token quality: ', TokenQuality), isempty(RateCardVersionId)")
+    ) 'The workbook must report missing token evidence before it reports a missing rate.'
     foreach ($query in @($queries | Where-Object { $_ -match '\bAICostAllocation_CL\b' })) {
         Assert-True (
             $query.Contains("RecordType == 'allocation'") -and

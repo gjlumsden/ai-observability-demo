@@ -154,6 +154,17 @@ foreach ($relativePath in $policyPaths) {
             'context.Response.Body.As<string>(preserveContent: true)'
         )
     ) "The outbound policy does not preserve response content in $relativePath."
+
+    if ($relativePath -eq 'apim-policies\weather-agent-model.xml') {
+        $policyText = Get-Content -LiteralPath $path -Raw
+        Assert-True (
+            $policyText.Contains('streamOptions[&quot;include_usage&quot;] = true;')
+        ) 'The weather-agent model policy must request usage in streamed responses.'
+        Assert-True (
+            $outboundLogs[0].InnerText.Contains('responseText.Split(''\n'')') -and
+            $outboundLogs[0].InnerText.Contains('candidate["usage"] is Newtonsoft.Json.Linq.JObject')
+        ) 'The weather-agent model policy must extract usage from an SSE response.'
+    }
 }
 
 $key = [byte[]](1..32)

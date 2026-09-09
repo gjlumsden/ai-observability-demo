@@ -38,6 +38,18 @@
         </return-response>
       </when>
     </choose>
+    <set-body>@{
+      var body = context.Request.Body.As&lt;Newtonsoft.Json.Linq.JObject&gt;(preserveContent: true);
+      var streamValue = body[&quot;stream&quot;];
+      if (streamValue != null &amp;&amp; streamValue.Type == Newtonsoft.Json.Linq.JTokenType.Boolean &amp;&amp; (bool)streamValue)
+      {
+        var streamOptions = body[&quot;stream_options&quot;] as Newtonsoft.Json.Linq.JObject
+          ?? new Newtonsoft.Json.Linq.JObject();
+        streamOptions[&quot;include_usage&quot;] = true;
+        body[&quot;stream_options&quot;] = streamOptions;
+      }
+      return body.ToString(Newtonsoft.Json.Formatting.None);
+    }</set-body>
     <rewrite-uri template="/v1/chat/completions" copy-unmatched-params="false" />
     <llm-token-limit
       counter-key="@(context.Subscription.Id)"
@@ -85,7 +97,31 @@
           : context.Response.Body.As<string>(preserveContent: true);
         if (!string.IsNullOrWhiteSpace(responseText))
         {
-          payload = Newtonsoft.Json.Linq.JObject.Parse(responseText);
+          if (responseText.TrimStart().StartsWith("data:"))
+          {
+            foreach (var responseLine in responseText.Split('\n'))
+            {
+              var line = responseLine.Trim();
+              if (!line.StartsWith("data:"))
+              {
+                continue;
+              }
+              var data = line.Substring(5).Trim();
+              if (data.Length == 0 || data == "[DONE]")
+              {
+                continue;
+              }
+              var candidate = Newtonsoft.Json.Linq.JObject.Parse(data);
+              if (candidate["usage"] is Newtonsoft.Json.Linq.JObject)
+              {
+                payload = candidate;
+              }
+            }
+          }
+          else
+          {
+            payload = Newtonsoft.Json.Linq.JObject.Parse(responseText);
+          }
         }
       }
       catch (Exception)
