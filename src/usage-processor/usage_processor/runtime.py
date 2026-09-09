@@ -110,11 +110,21 @@ def run_external_claude_context():
         validator,
     ) = _common_services()
     start, end = default_external_query_range()
+    usage_query = MonitorUsageQuery(
+        settings.log_analytics_workspace_id,
+        credential,
+        settings.workload_model_resource_ids,
+    )
     return process_external_claude_context(
         settings=settings,
         start=start,
         end=end,
-        cost_query=SubscriptionCostQuery(settings.subscription_id, credential),
+        cost_query=SubscriptionCostQuery(
+            settings.subscription_id,
+            credential,
+            settings.workload_resource_group_id,
+        ),
+        usage_query=usage_query,
         state_store=state_store,
         ingestion_writer=ingestion_writer,
         validator=validator,

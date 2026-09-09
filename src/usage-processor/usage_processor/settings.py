@@ -143,6 +143,8 @@ class Settings:
                 "DCR_ENDPOINT": self.dcr_endpoint,
                 "DCR_IMMUTABLE_ID": self.dcr_immutable_id,
                 "DCR_ALLOCATION_STREAM": self.dcr_allocation_stream,
+                "LOG_ANALYTICS_WORKSPACE_ID": self.log_analytics_workspace_id,
+                "WORKLOAD_RESOURCE_GROUP_ID": self.workload_resource_group_id,
             }
         )
 

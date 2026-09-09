@@ -195,13 +195,17 @@ and do not cite private sessions.
 - Reason: A single, locked scope keeps the workload financial authority clear and
   avoids accidental subscription or billing exposure.
 
-### D3: Subscription Claude CCU is external and unallocated
+### D3: Subscription Claude CCU uses guarded single-resource allocation
 
-- Decision: The processor reads subscription-wide Claude Consumption Unit (CCU)
-  actuals only as external context. It never allocates them to a team or
-  individual and excludes them from every demo total.
-- Reason: A subscription CCU total can include other workloads. Allocating it
-  would create a false chargeback.
+- Decision: The processor allocates exact subscription-wide Claude Consumption
+  Unit (CCU) actuals when the demo has exactly one model resource and one
+  configured Anthropic model version. It uses Cost Management first and Usage
+  Details when throttling or zero-row suppression occurs. It uses the matching
+  Claude rate-card estimates as team and subject weights. If either invariant
+  changes, it keeps the CCU cost as excluded external context.
+- Reason: The current subscription has one Claude model for this workload, so
+  the full CCU charge belongs to this resource group. The invariant prevents a
+  false chargeback if another Claude workload or model is added.
 
 ### D4: No optional FinOps analytics platform
 

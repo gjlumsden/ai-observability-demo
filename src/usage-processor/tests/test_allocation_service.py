@@ -267,6 +267,61 @@ class AllocationServiceTests(unittest.TestCase):
             "unallocated-resource-mismatch",
         )
 
+    def test_external_context_allocates_ccu_to_the_only_model_resource(self):
+        state = InMemoryStateStore()
+        writer = FailureWriter()
+        usage_query = FakeUsageQuery()
+        result = process_external_claude_context(
+            settings=settings(),
+            start=datetime(2026, 8, 1, tzinfo=timezone.utc),
+            end=datetime(2026, 8, 8, tzinfo=timezone.utc),
+            cost_query=FakeCostQuery([[external_cost("2026-08-07", "12")]]),
+            state_store=state,
+            ingestion_writer=writer,
+            validator=ContractValidator(),
+            usage_query=usage_query,
+        )
+
+        self.assertEqual(result, {"processed": 1, "rows": 3, "duplicate": False})
+        allocations = [
+            row
+            for _, rows in writer.successful
+            for row in rows
+            if row["RecordType"] == "allocation"
+        ]
+        self.assertEqual(usage_query.calls, 1)
+        self.assertEqual({row["AttributionStatus"] for row in allocations}, {"allocated"})
+        self.assertEqual(sum(row["AllocatedBilledCost"] for row in allocations), 12.0)
+        self.assertTrue(all(row["IncludedInWorkloadTotal"] for row in allocations))
+        self.assertTrue(
+            all(row["SourceScope"] == RESOURCE_GROUP_ID.lower() for row in allocations)
+        )
+
+    def test_external_context_remains_excluded_when_model_scope_is_ambiguous(self):
+        ambiguous_settings = settings()
+        ambiguous_settings.workload_model_resource_ids = (
+            MODEL_RESOURCE_ID.lower(),
+            "/subscriptions/test/resourceGroups/other/providers/Microsoft.CognitiveServices/accounts/other",
+        )
+        writer = FailureWriter()
+
+        result = process_external_claude_context(
+            settings=ambiguous_settings,
+            start=datetime(2026, 8, 1, tzinfo=timezone.utc),
+            end=datetime(2026, 8, 8, tzinfo=timezone.utc),
+            cost_query=FakeCostQuery([[external_cost("2026-08-07", "12")]]),
+            state_store=InMemoryStateStore(),
+            ingestion_writer=writer,
+            validator=ContractValidator(),
+            usage_query=FakeUsageQuery(),
+        )
+
+        self.assertEqual(result, {"processed": 1, "rows": 1, "duplicate": False})
+        row = writer.successful[0][1][0]
+        self.assertEqual(row["AttributionStatus"], "external-unallocated")
+        self.assertEqual(row["SourceScope"], "subscription")
+        self.assertFalse(row["IncludedInWorkloadTotal"])
+
     def test_external_context_uses_stable_identity_for_adjacent_windows(self):
         state = InMemoryStateStore()
         writer = FailureWriter()

@@ -477,8 +477,8 @@ Confirm that the attribution dashboard shows:
 - Rate-card estimates.
 - Allocated FOCUS `BilledCost` and `EffectiveCost`.
 - Unallocated resource-group cost and reconciliation.
-- Resource-group Claude CCU actual or unavailable status.
-- Subscription-wide Claude CCU external context, excluded from demo totals.
+- Guarded subscription-wide Claude CCU allocation for the sole Claude model.
+- Excluded subscription CCU context when the single-model invariant is not met.
 - Data freshness and allocation exceptions.
 
 Confirm that the operations dashboard shows Event Hubs ingress, Capture state,
@@ -528,8 +528,8 @@ For the Foundry resource and each model:
 2. Use the recorded UTC window.
 3. Verify request, token, latency, error, and Content Safety activity.
 4. Record the latest data timestamp.
-5. For Claude, compare the estimate, resource-group CCU status, and excluded
-   subscription context. Do not combine these values.
+5. For Claude, compare the estimate with the guarded subscription CCU allocation.
+   If the single-model invariant fails, use the excluded subscription context.
 
 The Foundry projects have Application Insights connections. The core scenarios call model endpoints directly.
 
@@ -569,10 +569,9 @@ At the resource-group scope:
 6. Check for the automatic Foundry `project` tag.
 7. Use the resource-and-meter view if the preview project tag is absent.
 
-For Claude, look for the CCU meter. Azure Cost Management aggregates CCU billed
-cost and does not provide the same per-model token view as Foundry. A
-subscription charge does not prove that the row exists in the resource-group
-FOCUS export.
+For Claude, look for the exact CCU meter. Azure Cost Management reports this
+charge at subscription scope. The processor attributes it to this resource group
+only while one model resource and one Anthropic model version are configured.
 
 For OpenAI, inspect the model billing meters. Input, cached input, and output tokens can use different rates.
 
@@ -695,9 +694,10 @@ rows. Check the Function, DCR, managed export, Data Factory, and FOCUS freshness
 panels. Confirm the resource-group and model resource IDs match the deployed
 allowlist.
 
-If only Claude actual is absent, check for
-`actual-unavailable-at-resource-group-scope`. Keep the subscription-wide CCU
-panel separate.
+If Claude actual is absent, check `RecordClaudeCcuContext` for Cost Management
+HTTP 429 responses. The processor retries three times at 60-second intervals.
+It then uses paged Usage Details data. It also uses this fallback when Cost
+Management suppresses exact zero-cost CCU rows.
 
 ## Teardown
 

@@ -4,14 +4,16 @@ from decimal import Decimal
 import hashlib
 import json
 import time as time_module
+from urllib.parse import urlencode, urlparse
+from urllib.request import Request, urlopen
 import uuid
 
 from . import ALLOCATION_VERSION
-from .allocation import with_record_identity
+from .allocation import CostBucket, with_record_identity
 from .errors import FocusContractError
+from .rates import load_provider_model_versions
 
 
-EXACT_CLAUDE_PUBLISHERS = {"anthropic"}
 EXACT_MARKETPLACE_TYPES = {"marketplace"}
 EXACT_CLAUDE_METERS = {
     "claude consumption unit",
@@ -30,13 +32,33 @@ class ExternalCost:
 
 
 class SubscriptionCostQuery:
-    def __init__(self, subscription_id, credential, max_attempts=3, sleep=None):
+    def __init__(
+        self,
+        subscription_id,
+        credential,
+        workload_resource_group_id=None,
+        max_attempts=3,
+        sleep=None,
+        usage_details_query=None,
+    ):
         from azure.mgmt.costmanagement import CostManagementClient
 
         self._client = CostManagementClient(credential=credential)
         self._scope = f"/subscriptions/{subscription_id}"
+        self._resource_group_name = _resource_group_name(
+            workload_resource_group_id
+        )
         self._max_attempts = max_attempts
         self._sleep = sleep or time_module.sleep
+        self._usage_details_query = usage_details_query or (
+            lambda start, end: query_claude_ccu_usage_details(
+                subscription_id,
+                credential,
+                start,
+                end,
+                self._resource_group_name,
+            )
+        )
 
     def query_claude_ccu(self, start, end):
         from azure.mgmt.costmanagement.models import (
@@ -63,7 +85,7 @@ class SubscriptionCostQuery:
                     )
                 },
                 grouping=[
-                    QueryGrouping(type="Dimension", name="PublisherName"),
+                    QueryGrouping(type="Dimension", name="ResourceGroupName"),
                     QueryGrouping(type="Dimension", name="PublisherType"),
                     QueryGrouping(type="Dimension", name="Meter"),
                 ],
@@ -75,11 +97,114 @@ class SubscriptionCostQuery:
                     scope=self._scope,
                     parameters=definition,
                 )
-                return select_exact_claude_ccu(result)
+                costs = select_exact_claude_ccu(
+                    result,
+                    self._resource_group_name,
+                )
+                fallback = getattr(self, "_usage_details_query", None)
+                if costs or fallback is None:
+                    return costs
+                return fallback(start, end)
             except Exception as error:
-                if _http_status(error) != 429 or attempt + 1 == self._max_attempts:
+                if _http_status(error) != 429:
                     raise
+                if attempt + 1 == self._max_attempts:
+                    fallback = getattr(self, "_usage_details_query", None)
+                    if fallback is None:
+                        raise
+                    return fallback(start, end)
                 self._sleep(_retry_after_seconds(error))
+
+
+def _resource_group_name(resource_group_id):
+    if not resource_group_id:
+        return None
+    return str(resource_group_id).rstrip("/").split("/")[-1].casefold()
+
+
+def query_claude_ccu_usage_details(
+    subscription_id,
+    credential,
+    start,
+    end,
+    resource_group_name=None,
+    open_url=urlopen,
+):
+    query_filter = (
+        f"properties/usageEnd ge '{start.astimezone(timezone.utc).isoformat().replace('+00:00', 'Z')}' "
+        f"and properties/usageEnd le '{end.astimezone(timezone.utc).isoformat().replace('+00:00', 'Z')}'"
+    )
+    parameters = urlencode(
+        {
+            "$filter": query_filter,
+            "$top": "500",
+            "api-version": "2023-05-01",
+        }
+    )
+    url = (
+        "https://management.azure.com/subscriptions/"
+        f"{subscription_id}/providers/Microsoft.Consumption/usageDetails?{parameters}"
+    )
+    token = credential.get_token(
+        "https://management.azure.com/.default"
+    ).token
+    items = []
+    for _ in range(100):
+        parsed = urlparse(url)
+        if parsed.scheme != "https" or parsed.hostname != "management.azure.com":
+            raise FocusContractError(
+                "The Usage Details continuation URL is not an Azure Resource Manager URL."
+            )
+        request = Request(
+            url.replace(" ", "%20").replace("'", "%27"),
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        with open_url(request, timeout=120) as response:
+            payload = json.load(response)
+        items.extend(payload.get("value") or [])
+        url = payload.get("nextLink")
+        if not url:
+            break
+    else:
+        raise FocusContractError("The Usage Details response exceeded 100 pages.")
+    return select_exact_claude_usage_details(items, resource_group_name)
+
+
+def select_exact_claude_usage_details(items, resource_group_name=None):
+    totals = {}
+    for item in items or []:
+        properties = item.get("properties") or {}
+        publisher = str(properties.get("publisherName") or "").strip()
+        publisher_type = str(properties.get("publisherType") or "").strip()
+        meter_id = str(properties.get("meterId") or "").strip()
+        row_resource_group = str(properties.get("resourceGroup") or "").strip()
+        if (
+            publisher.casefold() != "anthropic"
+            or publisher_type.casefold() not in EXACT_MARKETPLACE_TYPES
+            or meter_id.casefold() != "claude-consumption-units"
+            or (
+                resource_group_name
+                and row_resource_group.casefold() != resource_group_name
+            )
+        ):
+            continue
+        usage_date = _usage_date(properties.get("date"))
+        currency = str(properties.get("billingCurrencyCode") or "").upper()
+        key = (usage_date, currency)
+        totals[key] = totals.get(key, Decimal(0)) + Decimal(
+            str(properties.get("costInBillingCurrency"))
+        )
+    return [
+        ExternalCost(
+            usage_date=usage_date,
+            publisher_name="Anthropic",
+            publisher_type="Marketplace",
+            meter_name="Claude Consumption Unit",
+            currency=currency,
+            billed_cost=billed_cost,
+        )
+        for (usage_date, currency), billed_cost in sorted(totals.items())
+    ]
 
 
 def _http_status(error):
@@ -102,10 +227,10 @@ def _retry_after_seconds(error):
     try:
         return min(60.0, max(0.0, float(value)))
     except (TypeError, ValueError):
-        return 5.0
+        return 60.0
 
 
-def select_exact_claude_ccu(result):
+def select_exact_claude_ccu(result, resource_group_name=None):
     columns = getattr(result, "columns", None)
     rows = getattr(result, "rows", None)
     if columns is None or rows is None:
@@ -117,7 +242,7 @@ def select_exact_claude_ccu(result):
         "PreTaxCost",
         "UsageDate",
         "Currency",
-        "PublisherName",
+        "ResourceGroupName",
         "PublisherType",
         "Meter",
     }
@@ -129,19 +254,22 @@ def select_exact_claude_ccu(result):
     matches = []
     for values in rows or []:
         row = dict(zip(names, values))
-        publisher = str(row["PublisherName"]).strip()
+        row_resource_group = str(row["ResourceGroupName"]).strip()
         publisher_type = str(row["PublisherType"]).strip()
         meter = str(row["Meter"]).strip()
         if (
-            publisher.casefold() not in EXACT_CLAUDE_PUBLISHERS
-            or publisher_type.casefold() not in EXACT_MARKETPLACE_TYPES
+            publisher_type.casefold() not in EXACT_MARKETPLACE_TYPES
             or meter.casefold() not in EXACT_CLAUDE_METERS
+            or (
+                resource_group_name
+                and row_resource_group.casefold() != resource_group_name
+            )
         ):
             continue
         matches.append(
             ExternalCost(
                 usage_date=_usage_date(row["UsageDate"]),
-                publisher_name=publisher,
+                publisher_name="Anthropic",
                 publisher_type=publisher_type,
                 meter_name=meter,
                 currency=str(row["Currency"]).upper(),
@@ -179,6 +307,33 @@ def external_result_etag(costs, *, query_start=None, query_end=None):
         "utf-8"
     )
     return hashlib.sha256(encoded).hexdigest()
+
+
+def build_external_bucket(cost, model_resource_id):
+    model_version = load_provider_model_versions().get("anthropic")
+    if model_version is None:
+        return None
+    start = datetime.combine(cost.usage_date, time.min, tzinfo=timezone.utc)
+    return CostBucket(
+        charge_period_start=start,
+        charge_period_end=start + timedelta(days=1),
+        billing_period_start=start.replace(day=1),
+        billing_period_end=None,
+        provider="Anthropic",
+        publisher_name=cost.publisher_name,
+        meter_id=None,
+        meter_name=cost.meter_name,
+        resource_id=model_resource_id,
+        billing_currency=cost.currency,
+        source_quantity=None,
+        source_unit="CCU",
+        billed_cost=cost.billed_cost,
+        effective_cost=None,
+        model=model_version[0],
+        token_category="estimated_cost",
+        unit_rate=None,
+        rate_card_version_id=model_version[1],
+    )
 
 
 def build_external_rows(

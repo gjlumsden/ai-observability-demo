@@ -1083,8 +1083,8 @@
       {
         "id": 22,
         "type": "table",
-        "title": "Claude resource-group CCU status",
-        "description": "Shows a resource-group actual only when FOCUS contains an exact Claude CCU bucket. An unavailable marker is never included in workload totals.",
+        "title": "Claude CCU attribution status",
+        "description": "Shows guarded subscription CCU attribution when exactly one model resource and Anthropic model version are configured.",
         "gridPos": {
           "h": 7,
           "w": 8,
@@ -1107,7 +1107,7 @@
               "resources": [
                 "__WORKSPACE_RESOURCE_ID__"
               ],
-              "query": "let AllocationRows = materialize(AICostAllocation_CL\n| where RecordType == \"allocation\"\n| summarize arg_max(TimeGenerated, *) by RunId, RecordId);\nlet CompleteRuns = AICostAllocation_CL\n| where RecordType == \"run-complete\"\n| summarize arg_max(TimeGenerated, *) by RunId\n| join kind=leftouter (AllocationRows | summarize ActualRecordCount = count() by RunId) on RunId\n| extend ActualRecordCount = coalesce(ActualRecordCount, 0)\n| where ActualRecordCount == ExpectedRecordCount;\nlet LatestRuns = CompleteRuns\n| summarize arg_max(TimeGenerated, *) by SourceType, SourceScope, SourcePath\n| project RunId;\nLatestRuns\n| join kind=inner (AllocationRows) on RunId\n| where SourceScope =~ \"__RESOURCE_GROUP_ID__\"\n| where ChargePeriodStart <= $__timeTo() and ChargePeriodEnd > $__timeFrom()\n| where Provider =~ \"Anthropic\" and MeterName in~ (\"Claude Consumption Unit\", \"Claude Consumption Unit (CCU)\")\n| summarize SourceBilledCost = any(SourceBilledCost), IncludedInWorkloadTotal = any(IncludedInWorkloadTotal), AttributionStatus = any(AttributionStatus) by RunId, SourcePath, ChargePeriodStart, MeterName\n| summarize ActualRows = countif(IncludedInWorkloadTotal == true and isnotnull(SourceBilledCost)), ActualBilledCost = sumif(SourceBilledCost, IncludedInWorkloadTotal == true), UnavailableRows = countif(AttributionStatus == \"actual-unavailable-at-resource-group-scope\")\n| project Status = case(ActualRows > 0, \"Resource-group actual available\", UnavailableRows > 0, \"Claude actual unavailable at resource-group scope\", \"No resource-group CCU source row\"), ActualBilledCost = iff(ActualRows > 0, ActualBilledCost, real(null))",
+              "query": "let AllocationRows = materialize(AICostAllocation_CL\n| where RecordType == \"allocation\"\n| summarize arg_max(TimeGenerated, *) by RunId, RecordId);\nlet CompleteRuns = AICostAllocation_CL\n| where RecordType == \"run-complete\"\n| summarize arg_max(TimeGenerated, *) by RunId\n| join kind=leftouter (AllocationRows | summarize ActualRecordCount = count() by RunId) on RunId\n| extend ActualRecordCount = coalesce(ActualRecordCount, 0)\n| where ActualRecordCount == ExpectedRecordCount;\nlet LatestRuns = CompleteRuns\n| summarize arg_max(TimeGenerated, *) by SourceType, SourceScope, SourcePath\n| project RunId;\nLatestRuns\n| join kind=inner (AllocationRows) on RunId\n| where SourceScope =~ \"__RESOURCE_GROUP_ID__\"\n| where ChargePeriodStart <= $__timeTo() and ChargePeriodEnd > $__timeFrom()\n| where Provider =~ \"Anthropic\" and MeterName in~ (\"Claude Consumption Unit\", \"Claude Consumption Unit (CCU)\")\n| summarize SourceBilledCost = any(SourceBilledCost), IncludedInWorkloadTotal = any(IncludedInWorkloadTotal), AttributionStatus = any(AttributionStatus) by RunId, SourcePath, ChargePeriodStart, MeterName\n| summarize ActualRows = countif(IncludedInWorkloadTotal == true and isnotnull(SourceBilledCost)), ActualBilledCost = sumif(SourceBilledCost, IncludedInWorkloadTotal == true), UnavailableRows = countif(AttributionStatus == \"actual-unavailable-at-resource-group-scope\")\n| project Status = case(ActualRows > 0, \"Attributed CCU actual available\", UnavailableRows > 0, \"Claude CCU not present in resource-group FOCUS\", \"No attributed CCU source row\"), ActualBilledCost = iff(ActualRows > 0, ActualBilledCost, real(null))",
               "resultFormat": "table"
             }
           }
@@ -1124,8 +1124,8 @@
       {
         "id": 23,
         "type": "table",
-        "title": "Subscription-wide Claude CCU actual — external context",
-        "description": "External subscription context only. Every row has IncludedInWorkloadTotal=false and is excluded from executive, team, and individual totals.",
+        "title": "Claude CCU fallback — external context",
+        "description": "Fallback only. These rows appear when the guarded single-model attribution invariant is not met.",
         "gridPos": {
           "h": 7,
           "w": 8,
@@ -1174,7 +1174,7 @@
         },
         "options": {
           "mode": "markdown",
-          "content": "### Authority\n- **Usage:** provider-reported token counts.\n- **Rate-card estimate:** versioned calculation; not a bill.\n- **Allocated billed cost:** resource-group FOCUS billed authority.\n- **Allocated effective cost:** resource-group FOCUS effective authority.\n- **Claude actual unavailable:** the resource-group source has no exact CCU bucket.\n- **External context:** subscription-wide Claude CCU actual. It is always excluded from workload totals."
+          "content": "### Authority\n- **Usage:** provider-reported token counts.\n- **Rate-card estimate:** versioned calculation; not a bill.\n- **Allocated billed cost:** resource-group FOCUS billed authority.\n- **Allocated effective cost:** resource-group FOCUS effective authority.\n- **Claude CCU:** subscription actual allocated while the single-model invariant holds.\n- **External context:** excluded fallback when guarded allocation is not safe."
         }
       }
     ],

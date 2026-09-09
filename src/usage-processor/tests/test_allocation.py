@@ -16,6 +16,7 @@ from usage_processor.cost_context import (
     build_external_rows,
     external_result_etag,
     select_exact_claude_ccu,
+    select_exact_claude_usage_details,
 )
 from usage_processor.errors import FocusContractError, ScopeViolation
 from usage_processor.focus import (
@@ -253,16 +254,16 @@ class ExternalContextTests(unittest.TestCase):
             "PreTaxCost",
             "UsageDate",
             "Currency",
-            "PublisherName",
+            "ResourceGroupName",
             "PublisherType",
             "Meter",
         ]
         result = SimpleNamespace(
             columns=[SimpleNamespace(name=name) for name in names],
             rows=[
-                [10, 20260828, "USD", "Anthropic", "Marketplace", "Claude Consumption Unit"],
-                [99, 20260828, "USD", "Other", "Marketplace", "Claude Consumption Unit"],
-                [88, 20260828, "USD", "Anthropic", "Marketplace", "Other"],
+                [10, 20260828, "USD", "ai-observability-demo", "Marketplace", "Claude Consumption Unit"],
+                [99, 20260828, "USD", "other", "Microsoft", "Claude Consumption Unit"],
+                [88, 20260828, "USD", "ai-observability-demo", "Marketplace", "Other"],
             ],
         )
         costs = select_exact_claude_ccu(result)
@@ -278,6 +279,35 @@ class ExternalContextTests(unittest.TestCase):
         self.assertIsNone(rows[0]["SubjectId"])
         self.assertIsNone(rows[0]["AllocatedBilledCost"])
         ContractValidator().validate_allocation(rows[0])
+
+    def test_usage_details_selects_and_sums_exact_resource_group_ccu(self):
+        items = [
+            {
+                "properties": {
+                    "date": "2026-08-28T00:00:00Z",
+                    "publisherName": "Anthropic",
+                    "publisherType": "Marketplace",
+                    "meterId": "claude-consumption-units",
+                    "billingCurrencyCode": "USD",
+                    "costInBillingCurrency": cost,
+                    "resourceGroup": resource_group,
+                }
+            }
+            for cost, resource_group in (
+                ("5", "ai-observability-demo"),
+                ("7", "ai-observability-demo"),
+                ("99", "other"),
+            )
+        ]
+
+        costs = select_exact_claude_usage_details(
+            items,
+            "ai-observability-demo",
+        )
+
+        self.assertEqual(len(costs), 1)
+        self.assertEqual(costs[0].billed_cost, Decimal("12"))
+        self.assertEqual(costs[0].meter_name, "Claude Consumption Unit")
 
     def test_external_etag_changes_when_query_window_changes(self):
         costs = [

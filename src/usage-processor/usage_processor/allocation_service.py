@@ -7,7 +7,11 @@ from .allocation import (
     build_run_complete_row,
     unavailable_claude_row,
 )
-from .cost_context import build_external_rows, external_result_etag
+from .cost_context import (
+    build_external_bucket,
+    build_external_rows,
+    external_result_etag,
+)
 from .errors import FocusContractError, ScopeViolation
 from .focus import (
     group_focus_rows,
@@ -165,6 +169,7 @@ def process_external_claude_context(
     state_store,
     ingestion_writer,
     validator,
+    usage_query=None,
 ):
     costs = cost_query.query_claude_ccu(start, end)
     source_etag = external_result_etag(
@@ -192,12 +197,37 @@ def process_external_claude_context(
         "reading",
         {"RunId": run_id, "Attempt": attempt},
     )
-    rows = build_external_rows(
-        costs,
-        source_path,
-        source_etag,
-        run_id=run_id,
-    )
+    model_resource_ids = tuple(settings.workload_model_resource_ids)
+    attributed = usage_query is not None and len(model_resource_ids) == 1
+    rows = []
+    if attributed:
+        for cost in costs:
+            bucket = build_external_bucket(cost, model_resource_ids[0])
+            if bucket is None:
+                attributed = False
+                break
+            weights = usage_query.get_weights(
+                bucket,
+                settings.workload_resource_group_id,
+            )
+            rows.extend(
+                allocate_cost_bucket(
+                    bucket,
+                    weights,
+                    run_id=run_id,
+                    source_scope=settings.workload_resource_group_id,
+                    source_path=source_path,
+                    source_etag=source_etag,
+                    no_usage_status="external-unallocated-no-matching-usage",
+                )
+            )
+    if not attributed:
+        rows = build_external_rows(
+            costs,
+            source_path,
+            source_etag,
+            run_id=run_id,
+        )
     for row in rows:
         validator.validate_allocation(row)
     claim = state_store.transition(
@@ -213,7 +243,11 @@ def process_external_claude_context(
     completion = build_run_complete_row(
         run_id=run_id,
         source_type=EXTERNAL_QUERY_SOURCE_TYPE,
-        source_scope=EXTERNAL_QUERY_SOURCE_SCOPE,
+        source_scope=(
+            settings.workload_resource_group_id
+            if attributed
+            else EXTERNAL_QUERY_SOURCE_SCOPE
+        ),
         source_path=source_path,
         source_etag=source_etag,
         expected_record_count=len(rows),
