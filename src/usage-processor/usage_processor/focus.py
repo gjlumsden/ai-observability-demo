@@ -25,6 +25,7 @@ CLAUDE_METERS = {
 MICROSOFT_PUBLISHERS = {"microsoft", "microsoft corporation"}
 OPENAI_SERVICES = {
     "azure ai foundry models",
+    "azure ai services",
     "azure cognitive services",
     "azure openai",
     "azure openai service",

@@ -158,6 +158,29 @@ class ScopeTests(unittest.TestCase):
         self.assertEqual(groups[0].model, "gpt-5.4")
         self.assertEqual(groups[0].token_category, "uncached_input")
 
+    def test_groups_azure_ai_services_model_cost(self):
+        row = {
+            "BilledCost": Decimal("4.367145"),
+            "EffectiveCost": Decimal("4.367145"),
+            "BillingCurrency": "USD",
+            "ChargePeriodStart": datetime(2026, 9, 8, tzinfo=timezone.utc),
+            "ChargePeriodEnd": datetime(2026, 9, 9, tzinfo=timezone.utc),
+            "PublisherName": "Microsoft",
+            "ServiceName": "Azure AI Services",
+            "x_SkuMeterCategory": "Foundry Models",
+            "SkuMeter": "5.4 opt Gl 1M Tokens",
+            "x_SkuMeterId": "10c9526f-97e1-5dd1-90df-6abd49e2da4a",
+            "ResourceId": MODEL_RESOURCE_ID,
+            "x_ResourceGroupName": "ai-observability-demo",
+            "SubAccountId": SUBSCRIPTION_ID,
+            "ConsumedQuantity": Decimal("1"),
+            "ConsumedUnit": "Units",
+        }
+        groups = group_focus_rows([row], [MODEL_RESOURCE_ID])
+        self.assertEqual(groups[0].provider, "OpenAI")
+        self.assertEqual(groups[0].model, "gpt-5.4")
+        self.assertEqual(groups[0].token_category, "output")
+
     def test_cognitive_services_name_does_not_classify_an_unknown_meter(self):
         row = {
             "PublisherName": "Microsoft",
