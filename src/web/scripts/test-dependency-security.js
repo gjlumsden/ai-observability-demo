@@ -5,6 +5,7 @@
 const assert = require('node:assert/strict');
 const path = require('node:path');
 const { readFileSync } = require('node:fs');
+const { renderMarkdown } = require('../lib/markdown');
 
 const FIRST_PATCHED_QS_VERSION = '6.16.0';
 
@@ -44,6 +45,13 @@ for (const [packagePath, entry] of qsEntries) {
   );
 }
 
+const sanitized = renderMarkdown(
+  '[safe](https://example.com) [unsafe](javascript:alert(1)) <script>alert(1)</script>'
+);
+assert.match(sanitized, /<a rel="noopener noreferrer" href="https:\/\/example\.com">safe<\/a>/);
+assert.doesNotMatch(sanitized, /href="javascript:/i);
+assert.doesNotMatch(sanitized, /<script/i);
+
 console.log(
-  `Dependency security test passed: qs resolves to >= ${FIRST_PATCHED_QS_VERSION} at every location (GHSA-x5fp-wj9c-mxmx).`
+  `Dependency security tests passed: qs resolves to >= ${FIRST_PATCHED_QS_VERSION}, and rendered Markdown removes unsafe HTML and URLs.`
 );

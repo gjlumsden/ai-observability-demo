@@ -12,6 +12,9 @@ param resourceSuffix string
 @description('A non-sensitive value that reruns the idempotent HMAC key bootstrap.')
 param hmacBootstrapRunId string
 
+@description('Deploy the one-time HMAC secret bootstrap script.')
+param bootstrapHmacSecret bool
+
 var cleanSuffix = toLower(replace(resourceSuffix, '-', ''))
 var keyVaultName = take('aiobs-kv-${cleanSuffix}', 24)
 var secretName = 'usage-hmac-key'
@@ -58,7 +61,7 @@ resource secretBootstrapRole 'Microsoft.Authorization/roleAssignments@2022-04-01
   }
 }
 
-resource secretBootstrap 'Microsoft.Resources/deploymentScripts@2023-08-01' = {
+resource secretBootstrap 'Microsoft.Resources/deploymentScripts@2023-08-01' = if (bootstrapHmacSecret) {
   name: 'create-usage-hmac-${cleanSuffix}'
   location: location
   kind: 'AzureCLI'

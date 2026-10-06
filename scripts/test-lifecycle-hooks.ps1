@@ -135,6 +135,10 @@ function Test-EntraCleanupContracts {
     Assert-True (
         $postprovision.Contains('azd env set ENTRA_CLIENT_ID $app.appId --cwd $repoRoot')
     ) 'The postprovision hook must persist the repaired ENTRA_CLIENT_ID in the local azd environment.'
+    Assert-True (
+        $postprovision.Contains('function Get-OptionalEntraServicePrincipalByClientId {') -and
+        $postprovision.Contains("'ad', 'sp', 'create'")
+    ) 'The postprovision hook must ensure the MISE application has a service principal.'
 
     Write-Host 'Validated approved and unapproved Entra cleanup contracts.'
 }

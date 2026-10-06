@@ -215,6 +215,23 @@ $resourceGroupExists = if ($resourceGroupName) {
 else {
   $false
 }
+
+$hmacBootstrapRequired = $true
+$keyVaultName = $values['USAGE_KEY_VAULT_NAME']
+$hmacSecretName = $values['USAGE_HMAC_SECRET_NAME']
+if ($resourceGroupExists -and $keyVaultName -and $hmacSecretName) {
+  $hmacSecretId = "$subscriptionScope/resourceGroups/$resourceGroupName/providers/Microsoft.KeyVault/vaults/$keyVaultName/secrets/$hmacSecretName"
+  $hmacBootstrapRequired = -not (Test-AzureResourceExists `
+      -ResourceId $hmacSecretId `
+      -ApiVersion '2025-05-01')
+}
+$hmacBootstrapValue = $hmacBootstrapRequired.ToString().ToLowerInvariant()
+& azd env set HMAC_BOOTSTRAP_REQUIRED $hmacBootstrapValue --cwd $repoRoot | Out-Null
+if ($LASTEXITCODE -ne 0) {
+  throw 'Could not store HMAC_BOOTSTRAP_REQUIRED in the azd environment.'
+}
+Write-Host "HMAC secret bootstrap required: $hmacBootstrapValue"
+
 if ($resourceGroupExists) {
   $mainResourceGroupId = "$subscriptionScope/resourceGroups/$resourceGroupName"
   $resourceInventoryJson = @(& az resource list `

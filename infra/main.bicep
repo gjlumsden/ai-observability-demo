@@ -46,6 +46,9 @@ param budgetEndDate string = ''
 @description('A non-sensitive value that reruns the idempotent HMAC key bootstrap.')
 param hmacBootstrapRunId string = utcNow('yyyyMMddHHmmss')
 
+@description('Deploy the one-time HMAC secret bootstrap script.')
+param bootstrapHmacSecret bool = true
+
 // Naming convention:
 // - Hyphenated resources: ai-observability-demo-<component>-<suffix>
 // - Globally-unique no-hyphen resources: aiobservability<component><suffix>
@@ -70,6 +73,7 @@ module usageStorage 'modules/usage-storage.bicep' = {
     tags: tags
     resourceSuffix: resourceSuffix
     logAnalyticsWorkspaceId: monitoring.outputs.lawId
+    deploymentPrincipalId: principalId
   }
 }
 
@@ -90,6 +94,7 @@ module identityVault 'modules/identity-vault.bicep' = {
     tags: tags
     resourceSuffix: resourceSuffix
     hmacBootstrapRunId: hmacBootstrapRunId
+    bootstrapHmacSecret: bootstrapHmacSecret
   }
 }
 

@@ -12,12 +12,19 @@ param resourceSuffix string
 @description('Log Analytics workspace resource ID for diagnostics.')
 param logAnalyticsWorkspaceId string
 
+@description('Principal that uploads Function deployment packages. Leave empty to skip the assignment.')
+param deploymentPrincipalId string = ''
+
 var cleanSuffix = toLower(replace(resourceSuffix, '-', ''))
 var storageAccountName = take('aiobsusage${cleanSuffix}', 24)
 var deploymentContainerName = 'function-releases'
 var captureContainerName = 'capture'
 var quarantineContainerName = 'quarantine'
 var processorStateTableName = 'processorstate'
+var storageBlobDataContributorRoleId = subscriptionResourceId(
+  'Microsoft.Authorization/roleDefinitions',
+  'ba92f5b4-2d11-453d-a403-e96b0029c9fe'
+)
 
 resource storageAccount 'Microsoft.Storage/storageAccounts@2023-05-01' = {
   name: storageAccountName
@@ -75,6 +82,15 @@ resource deploymentContainer 'Microsoft.Storage/storageAccounts/blobServices/con
   name: deploymentContainerName
   properties: {
     publicAccess: 'None'
+  }
+}
+
+resource deploymentPublisher 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (!empty(deploymentPrincipalId)) {
+  name: guid(deploymentContainer.id, deploymentPrincipalId, storageBlobDataContributorRoleId)
+  scope: deploymentContainer
+  properties: {
+    roleDefinitionId: storageBlobDataContributorRoleId
+    principalId: deploymentPrincipalId
   }
 }
 

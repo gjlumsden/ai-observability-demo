@@ -1,5 +1,5 @@
 const MarkdownIt = require('markdown-it');
-const sanitizeHtml = require('sanitize-html');
+const { FilterXSS } = require('xss');
 
 const markdown = new MarkdownIt({
   html: false,
@@ -31,22 +31,21 @@ const allowedTags = [
   'a'
 ];
 
+const whiteList = Object.fromEntries(allowedTags.map((tag) => [tag, []]));
+whiteList.a = ['href', 'title'];
+whiteList.code = ['class'];
+whiteList.th = ['scope'];
+
+const filter = new FilterXSS({
+  whiteList,
+  stripIgnoreTag: true,
+  stripIgnoreTagBody: ['script', 'style']
+});
+
 function renderMarkdown(value) {
   const rendered = markdown.render(String(value || ''));
-  return sanitizeHtml(rendered, {
-    allowedTags,
-    allowedAttributes: {
-      a: ['href', 'title', 'rel'],
-      code: ['class'],
-      th: ['scope']
-    },
-    allowedSchemes: ['http', 'https', 'mailto'],
-    transformTags: {
-      a: sanitizeHtml.simpleTransform('a', {
-        rel: 'noopener noreferrer'
-      }, true)
-    }
-  });
+  const sanitized = filter.process(rendered);
+  return sanitized.replace(/<a(?=\s|>)/g, '<a rel="noopener noreferrer"');
 }
 
 module.exports = { renderMarkdown };

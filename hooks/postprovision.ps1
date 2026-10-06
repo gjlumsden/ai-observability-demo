@@ -99,6 +99,27 @@ function Get-OptionalEntraApplicationByClientId {
     throw "Entra app lookup by client ID: $message"
 }
 
+function Get-OptionalEntraServicePrincipalByClientId {
+  param(
+      [Parameter(Mandatory = $true)][string] $ClientId
+  )
+
+  $output = & az ad sp show `
+      --only-show-errors `
+      --id $ClientId `
+      --output json 2>&1
+  if ($LASTEXITCODE -eq 0) {
+      return ($output -join "`n" | ConvertFrom-Json)
+  }
+
+  $message = $output -join "`n"
+  if ($message -match 'does not exist|could not be found|cannot find|not found') {
+      return $null
+  }
+
+  throw "Entra service principal lookup by client ID: $message"
+}
+
 $values = Get-AzdEnvironmentValues
 $subscriptionId = Get-RequiredValue $values 'AZURE_SUBSCRIPTION_ID'
 Invoke-Az 'Azure subscription selection' @('account', 'set', '--subscription', $subscriptionId, '--only-show-errors')
@@ -197,6 +218,16 @@ $appDetails = Invoke-AzJson 'Entra app details' @(
     '--id', $app.appId,
     '--output', 'json'
 )
+
+$servicePrincipal = Get-OptionalEntraServicePrincipalByClientId -ClientId $app.appId
+if (-not $servicePrincipal) {
+    $servicePrincipal = Invoke-AzJson 'Entra service principal create' @(
+        'ad', 'sp', 'create',
+        '--only-show-errors',
+        '--id', $app.appId,
+        '--output', 'json'
+    )
+}
 
 $scopeValue = 'access_as_user'
 $existingScope = $appDetails.api.oauth2PermissionScopes |

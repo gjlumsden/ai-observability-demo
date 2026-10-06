@@ -19,6 +19,9 @@
     },
     "budgetEndDate": {
       "value": "${BUDGET_END_DATE}"
+    },
+    "bootstrapHmacSecret": {
+      "value": "${HMAC_BOOTSTRAP_REQUIRED=true}"
     }
   }
 }

@@ -201,6 +201,12 @@ If only the usage processor needs a package repair, deploy that service:
 azd deploy usageProcessor --no-prompt
 ```
 
+Some managed subscriptions disable storage public-network access and shared-key
+authentication through Azure Policy. In the approved demo subscription, add
+`SecurityControl=Ignore` to the main and FinOps resource groups before deployment.
+The hooks preserve existing resource-group tags. The usage storage module grants
+the deployment principal blob access only to the Function package container.
+
 Package publication does not prove that the Python worker loaded the functions.
 The deployed Python 3.12 worker requires `typing.List[EventHubEvent]` for the batch
 binding. A built-in `list[EventHubEvent]` annotation prevented registration.
